@@ -9,7 +9,7 @@ body {
 }
 
 .container {
-  width: 300px;
+  width: 320px;
   padding: 20px;
   background: #fff;
   border-radius: 8px;
@@ -36,6 +36,7 @@ body {
   border-radius: 4px;
   overflow: hidden;
   margin-top: 10px;
+  position: relative;
 }
 
 #progress-bar {
@@ -43,4 +44,20 @@ body {
   height: 8px;
   background: #4caf50;
   transition: width 0.2s ease;
+}
+
+#status-message {
+  margin-top: 8px;
+  font-size: 0.9em;
+  color: #333;
+}
+
+.reset-button {
+  margin-top: 12px;
+  padding: 6px 12px;
+  border: none;
+  background: #4caf50;
+  color: white;
+  border-radius: 4px;
+  cursor: pointer;
 }

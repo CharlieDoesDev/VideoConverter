@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>MP4 → WebM Converter</title>
   <link rel="stylesheet" href="css/style.css"/>
@@ -12,11 +12,14 @@
     <div id="drop-zone">Drop MP4 here or click to select</div>
     <input type="file" id="file-input" accept="video/mp4" hidden/>
     <div id="progress-container" hidden>
-      <div id="progress-bar"></div>
+      <div id="progress-bar" aria-valuenow="0"></div>
+      <div id="status-message"></div>
     </div>
   </div>
 
-  <!-- single UMD bundle with mp4box, webm-muxer, converter logic -->
-  <script src="js/vendor/bundle.js"></script>
+  <!-- 1) MP4Box (UMD, attaches window.MP4Box) -->
+  <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
+  <!-- 2) Your converter logic as a module -->
+  <script type="module" src="js/converter.js"></script>
 </body>
 </html>

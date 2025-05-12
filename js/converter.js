@@ -1,27 +1,14 @@
-// js/converter.js
-import MP4Box from 'mp4box';
-import { Muxer, ArrayBufferTarget } from 'webm-muxer';
+// Pull in WebM muxer as an ES module
+import { Muxer, ArrayBufferTarget } from 'https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2?module';
 
-// DOM Elements
-document.body.insertAdjacentHTML('beforeend', `
-  <div class="container">
-    <h2>MP4 → WebM</h2>
-    <div id="drop-zone">Drop MP4 here or click to select</div>
-    <input type="file" id="file-input" accept="video/mp4" hidden />
-    <div id="progress-container" hidden>
-      <div id="progress-bar" aria-valuenow="0"></div>
-      <div id="status-message"></div>
-    </div>
-  </div>
-`);
-
+// Grab DOM elements
 const dropZone          = document.getElementById('drop-zone');
 const fileInput         = document.getElementById('file-input');
 const progressContainer = document.getElementById('progress-container');
 const progressBar       = document.getElementById('progress-bar');
 const statusMessage     = document.getElementById('status-message');
 
-// Event listeners
+// Highlight drop zone and wire up file selection
 dropZone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => e.target.files[0] && handleFile(e.target.files[0]));
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -32,17 +19,20 @@ dropZone.addEventListener('drop', e => {
   e.dataTransfer.files[0] && handleFile(e.dataTransfer.files[0]);
 });
 
+/**
+ * Kick off conversion
+ */
 async function handleFile(file) {
   if (!file.name.toLowerCase().endsWith('.mp4')) {
-    alert('Please select an MP4 file.');
-    return;
+    return alert('Please select an MP4 file.');
   }
   dropZone.hidden = true;
   progressContainer.hidden = false;
-  updateStatus('Starting conversion...');
+  updateStatus('Demuxing MP4…');
 
   try {
     const { track, samples } = await demuxMp4(file);
+    updateStatus('Transcoding frames…');
     await transcode(track, samples);
     updateStatus('Conversion complete!');
   } catch (err) {
@@ -52,22 +42,9 @@ async function handleFile(file) {
   }
 }
 
-function updateStatus(msg) {
-  statusMessage.textContent = msg;
-}
-
-function updateProgress(pct) {
-  const p = Math.min(100, Math.max(0, pct));
-  progressBar.style.width = p + '%';
-  progressBar.setAttribute('aria-valuenow', p);
-}
-
-function resetUI() {
-  progressContainer.hidden = true;
-  dropZone.hidden = false;
-}
-
-// Demux MP4 into track metadata + samples
+/**
+ * Demux an MP4 file into its H.264 track and raw samples
+ */
 async function demuxMp4(file) {
   const buffer = await file.arrayBuffer();
   buffer.fileStart = 0;
@@ -78,13 +55,20 @@ async function demuxMp4(file) {
     mp4boxFile.onError = e => reject(new Error(e));
 
     mp4boxFile.onReady = info => {
-      trackInfo = info.tracks.find(t => t.type === 'video' && t.codec?.startsWith('avc'));
-      if (!trackInfo) return reject(new Error('No H.264 track'));
+      trackInfo = info.tracks.find(t => 
+        t.type === 'video' && t.codec?.startsWith('avc')
+      );
+      if (!trackInfo) {
+        return reject(new Error('No H.264 video track found'));
+      }
       mp4boxFile.setExtractionOptions(trackInfo.id, null, { nbSamples: trackInfo.nb_samples });
-      mp4boxFile.start();
+      mp4boxFile.start();  
     };
 
-    mp4boxFile.onSamples = (_id, _user, arr) => samples.push(...arr);
+    mp4boxFile.onSamples = (_id, _user, arr) => {
+      samples.push(...arr);
+      updateProgress(Math.min(20, samples.length / trackInfo.nb_samples * 20));
+    };
 
     try {
       mp4boxFile.appendBuffer(buffer);
@@ -93,81 +77,119 @@ async function demuxMp4(file) {
       reject(e);
     }
 
-    // Poll until samples collected
-    const check = () => {
-      if (samples.length >= trackInfo.nb_samples) {
+    // Poll until done
+    (function checkDone() {
+      if (trackInfo && samples.length >= trackInfo.nb_samples) {
         resolve({ track: trackInfo, samples });
       } else {
-        setTimeout(check, 50);
+        setTimeout(checkDone, 50);
       }
-    };
-    check();
+    })();
   });
 }
 
-// Transcode via WebCodecs & mux to WebM
+/**
+ * Decode with WebCodecs → encode VP8 → mux into WebM
+ */
 async function transcode(track, samples) {
   if (!window.VideoDecoder || !window.VideoEncoder) {
-    throw new Error('WebCodecs not supported');
+    throw new Error('WebCodecs API not supported');
   }
 
+  // Build AVC description (SPS/PPS)
   const { codec, video: { width, height }, avcC, nb_samples } = track;
-  // Build description from avcC
-  const desc = buildAvcDescription(avcC);
+  if (!avcC) throw new Error('Missing codec config (avcC)');
 
-  // Setup muxer
-  const muxer = new Muxer({ target: new ArrayBufferTarget(), video: { codec: 'V_VP8', width, height, frameRate: 30 } });
+  const annexB = [];
+  const prefix = new Uint8Array([0,0,0,1]);
+  for (let sps of avcC.sequenceParameterSets) annexB.push(prefix, new Uint8Array(sps));
+  for (let pps of avcC.pictureParameterSets)    annexB.push(prefix, new Uint8Array(pps));
+  const description = concat(annexB).buffer;
+
+  // Setup WebM muxer
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'V_VP8', width, height, frameRate: 30 }
+  });
 
   let processed = 0;
   const encoder = new VideoEncoder({
     output: (chunk, meta) => {
       muxer.addVideoChunk(chunk, meta);
       processed++;
-      updateProgress((processed / nb_samples) * 100 * 0.95);
+      updateProgress(20 + (processed / nb_samples) * 75);
     },
-    error: e => { throw new Error(e); }
+    error: e => { throw e; }
   });
   encoder.configure({ codec: 'vp8', width, height, bitrate: 1_000_000, framerate: 30 });
 
   const decoder = new VideoDecoder({
-    output: frame => { encoder.encode(frame); frame.close(); },
-    error: e => { throw new Error(e); }
+    output: frame => { 
+      encoder.encode(frame); 
+      frame.close();
+    },
+    error: e => { throw e; }
   });
-  const decCfg = { codec, description: desc };
-  decoder.configure(decCfg);
+  decoder.configure({ codec, description });
 
-  for (const s of samples) {
-    const chunk = new EncodedVideoChunk({ type: s.is_rap ? 'key' : 'delta', timestamp: s.cts, data: s.data });
+  // Process all samples
+  for (let s of samples) {
+    const chunk = new EncodedVideoChunk({
+      type:      s.is_rap ? 'key' : 'delta',
+      timestamp: s.cts,
+      data:      s.data
+    });
     decoder.decode(chunk);
   }
   await decoder.flush();
   await encoder.flush();
 
+  // Finalize WebM and trigger download
   muxer.finalize();
   const { buffer } = muxer.target;
   const blob = new Blob([buffer], { type: 'video/webm' });
-  saveBlob(blob, 'converted.webm');
+  saveBlob(blob, file.name.replace(/\.mp4$/i, '.webm'));
   updateProgress(100);
 }
 
-// Build Annex-B SPS/PPS description
-function buildAvcDescription(avcC) {
-  const pre = new Uint8Array([0,0,0,1]);
-  const parts = [];
-  avcC.sequenceParameterSets.forEach(s => parts.push(pre, new Uint8Array(s)));
-  avcC.pictureParameterSets.forEach(p => parts.push(pre, new Uint8Array(p)));
-  return concat(parts).buffer;
+/** Concatenate many Uint8Arrays into one */
+function concat(chunks) {
+  let length = 0;
+  for (let c of chunks) length += c.length;
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (let c of chunks) {
+    result.set(c, offset);
+    offset += c.length;
+  }
+  return result;
 }
 
-function concat(arrays) {
-  let len = 0; arrays.forEach(a => len += a.length);
-  const out = new Uint8Array(len); let off = 0;
-  arrays.forEach(a => { out.set(a, off); off += a.length; });
-  return out;
+/** Update progress bar (0–100) */
+function updateProgress(pct) {
+  const p = Math.min(100, Math.max(0, pct));
+  progressBar.style.width = p + '%';
 }
 
-function saveBlob(blob, name) {
+/** Update status text */
+function updateStatus(msg) {
+  statusMessage.textContent = msg;
+}
+
+/** Reset UI on error or after finishing */
+function resetUI() {
+  progressContainer.hidden = true;
+  dropZone.hidden = false;
+}
+
+/** Trigger a download from a Blob */
+function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  const a   = document.createElement('a');
+  a.href    = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
