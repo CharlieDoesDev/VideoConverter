@@ -87,12 +87,16 @@ async function convertMp4ToWebM(file) {
   updateStatus('Setting up conversion pipeline...');
   
   const {
-    codec: codecString,
+    codec: rawCodecString,
     video: { width: trackWidth, height: trackHeight },
     avcC,
     timescale,
     nb_samples: totalSamples
   } = track;
+
+  // Ensure we have a valid codec string
+  const codecString = rawCodecString || '';
+  console.log('Original codec string:', codecString);
 
   // 2) Build AVC description from SPS/PPS for decoder configuration
   let descriptionBuffer = null;
@@ -177,12 +181,60 @@ async function convertMp4ToWebM(file) {
     }
   });
   
-  const decConfig = { codec: codecString };
+  // Make sure codec string is properly formatted for WebCodecs
+  // H.264 codec strings should be in format 'avc1.PPCCLL' where:
+  // PP = profile (42 = Baseline, 4D = Main, 64 = High)
+  // CC = constraints
+  // LL = level (e.g., 1F = Level 3.1)
+  let codec = codecString;
+  if (!codec || codec === 'undefined') {
+    // Fallback to a common H.264 profile if codec string is missing
+    codec = 'avc1.42001E'; // H.264 Baseline Profile Level 3.0
+    console.warn('Missing codec string, using fallback:', codec);
+  } else if (!codec.startsWith('avc1.')) {
+    // Fix codec string format if it's not properly formatted
+    // Extract the profile, constraint and level info if available in another format
+    const match = codec.match(/^(avc|AVC)(.*)$/);
+    if (match) {
+      // Try to preserve any profile/level info that might exist
+      const suffix = match[2] || '42001E';
+      codec = 'avc1.' + suffix.replace(/^[^0-9a-fA-F]/, '');
+    } else {
+      codec = 'avc1.42001E'; // Fallback
+    }
+    console.warn('Reformatted codec string:', codec);
+  }
+  
+  // Create decoder configuration
+  const decConfig = { 
+    codec: codec,
+    hardwareAcceleration: 'prefer-hardware',
+    optimizeForLatency: false
+  };
+  
   if (descriptionBuffer) {
     decConfig.description = descriptionBuffer;
   }
   
-  await decoder.configure(decConfig);
+  console.log('Using decoder config:', decConfig);
+  
+  try {
+    await decoder.configure(decConfig);
+  } catch (e) {
+    console.error('Decoder configuration failed:', e);
+    
+    // Try alternative configurations if the first attempt fails
+    if (e.message.includes('codec') || e.message.includes('Required member is undefined')) {
+      // Try with a standard H.264 profile as fallback
+      console.log('Trying fallback codec configuration...');
+      await decoder.configure({
+        codec: 'avc1.42001E', // Baseline Profile Level 3.0
+        description: descriptionBuffer
+      });
+    } else {
+      throw e; // Re-throw if it's not a codec issue
+    }
+  }
 
   // 7) Process all samples
   updateStatus('Converting video frames...');
@@ -283,12 +335,37 @@ async function demuxMp4(file) {
 
           // Look for H.264 video track
           trackInfo = info.tracks.find(t => 
-            t.type === 'video' && (t.codec.startsWith('avc') || t.codec.startsWith('AVC'))
+            t.type === 'video' && (t.codec?.startsWith('avc') || t.codec?.startsWith('AVC'))
           );
 
           if (!trackInfo) {
             clearTimeout(timeoutId);
             return reject(new Error('No H.264 video track found in the file'));
+          }
+          
+          // Ensure the codec string is properly formatted
+          if (!trackInfo.codec) {
+            // Try to reconstruct a codec string from available information
+            if (trackInfo.avcC) {
+              // Extract profile and level from avcC box if available
+              let profile = '42'; // Baseline profile by default
+              let level = '1E';   // Level 3.0 by default
+              
+              if (trackInfo.avcC.AVCProfileIndication) {
+                profile = trackInfo.avcC.AVCProfileIndication.toString(16).padStart(2, '0');
+              }
+              
+              if (trackInfo.avcC.AVCLevelIndication) {
+                level = trackInfo.avcC.AVCLevelIndication.toString(16).padStart(2, '0');
+              }
+              
+              trackInfo.codec = `avc1.${profile}001${level}`;
+              console.log('Reconstructed codec string:', trackInfo.codec);
+            } else {
+              // Fallback to a common H.264 profile
+              trackInfo.codec = 'avc1.42001E'; // H.264 Baseline Profile Level 3.0
+              console.log('Using fallback codec string:', trackInfo.codec);
+            }
           }
 
           mp4boxFile.setExtractionOptions(
