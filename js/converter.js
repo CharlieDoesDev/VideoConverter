@@ -1,6 +1,7 @@
 // js/converter.js
-// Pull in WebM muxer as an ES module
-import { Muxer, ArrayBufferTarget } from 'https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2?module';
+
+// Pull in the UMD globals:
+const { Muxer, ArrayBufferTarget } = WebMMuxer;  // :contentReference[oaicite:0]{index=0}
 
 // Grab DOM elements
 const dropZone          = document.getElementById('drop-zone');
@@ -38,7 +39,7 @@ async function handleFile(file) {
   try {
     const { track, samples } = await demuxMp4(file);
     updateStatus('Transcoding frames…');
-    await transcode(track, samples);
+    await transcode(track, samples, file.name);
     updateStatus('Conversion complete!');
   } catch (err) {
     console.error(err);
@@ -100,7 +101,7 @@ async function demuxMp4(file) {
 /**
  * Decode with WebCodecs → encode VP8 → mux into WebM
  */
-async function transcode(track, samples) {
+async function transcode(track, samples, originalName) {
   if (!window.VideoDecoder || !window.VideoEncoder) {
     throw new Error('WebCodecs API not supported');
   }
@@ -110,7 +111,7 @@ async function transcode(track, samples) {
   if (!avcDecoderConfigRecord?.buffer) {
     throw new Error('Missing codec config (avcDecoderConfigRecord)');
   }
-  const description = avcDecoderConfigRecord.buffer;  // Uint8Array
+  const description = avcDecoderConfigRecord.buffer;
 
   // Setup WebM muxer
   const muxer = new Muxer({
@@ -154,7 +155,7 @@ async function transcode(track, samples) {
   muxer.finalize();
   const { buffer } = muxer.target;
   const blob = new Blob([buffer], { type: 'video/webm' });
-  saveBlob(blob, file.name.replace(/\.mp4$/i, '.webm'));
+  saveBlob(blob, originalName.replace(/\.mp4$/i, '.webm'));
   updateProgress(100);
 }
 

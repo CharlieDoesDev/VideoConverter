@@ -17,9 +17,12 @@
     </div>
   </div>
 
-  <!-- 1) MP4Box (UMD, attaches window.MP4Box) -->
+  <!-- UMD build of webm-muxer, adds global `WebMMuxer` -->
+  <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2/build/webm-muxer.js"></script>
+  <!-- MP4Box (UMD, adds global `MP4Box`) -->
   <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
-  <!-- 2) Your converter logic as a module -->
+  <!-- Your ES module -->
   <script type="module" src="js/converter.js"></script>
+
 </body>
 </html>
