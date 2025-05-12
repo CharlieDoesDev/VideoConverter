@@ -1,5 +1,5 @@
 import MP4Box from 'mp4box';
-import { Muxer, ArrayBufferTarget } from 'webm-muxer'; // use named exports :contentReference[oaicite:0]{index=0}
+import { Muxer, ArrayBufferTarget } from 'webm-muxer';
 
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -14,7 +14,9 @@ dropZone.addEventListener('dragover', e => {
   e.preventDefault();
   dropZone.classList.add('dragover');
 });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('dragover');
+});
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('dragover');
@@ -41,13 +43,20 @@ async function convertMp4ToWebM(file) {
   const arrayBuffer = await file.arrayBuffer();
   arrayBuffer.fileStart = 0;
   const mp4boxFile = MP4Box.createFile();
-  let totalSamples = 0, processedSamples = 0;
+  let videoCodecString = '';
+  let videoCodecConfig = null;
+  let totalSamples = 0;
+  let processedSamples = 0;
   const samples = [];
 
   mp4boxFile.onError = e => { throw new Error(e); };
   mp4boxFile.onReady = info => {
     const track = info.tracks.find(t => t.codec.startsWith('avc'));
-    if (!track) throw new Error('No H.264 track found');
+    if (!track) throw new Error('No H.264 track found in MP4');
+    videoCodecString = track.codec;               // e.g. "avc1.42E01E"
+    if (track.avcDecoderConfigRecord?.buffer) {
+      videoCodecConfig = track.avcDecoderConfigRecord.buffer;
+    }
     totalSamples = track.nb_samples;
     mp4boxFile.setExtractionOptions(track.id, null, { nbSamples: totalSamples });
     mp4boxFile.start();
@@ -61,10 +70,10 @@ async function convertMp4ToWebM(file) {
     throw new Error('WebCodecs API not supported in this browser');
   }
 
-  // 2. Set up the WebM muxer with an ArrayBufferTarget
+  // 2. Set up WebM muxer
   const firstDesc = samples[0].description;
   const muxer = new Muxer({
-    target: new ArrayBufferTarget(),      // gather output into memory
+    target: new ArrayBufferTarget(),
     video: {
       codec: 'V_VP8',
       width: firstDesc.width,
@@ -73,7 +82,7 @@ async function convertMp4ToWebM(file) {
     }
   });
 
-  // 3. Configure decoder & encoder
+  // 3. Configure VideoEncoder
   const videoEncoder = new VideoEncoder({
     output: (chunk, meta) => {
       muxer.addVideoChunk(chunk, meta);
@@ -90,6 +99,7 @@ async function convertMp4ToWebM(file) {
     framerate: 30
   });
 
+  // 4. Configure VideoDecoder
   const videoDecoder = new VideoDecoder({
     output: frame => {
       videoEncoder.encode(frame);
@@ -97,23 +107,27 @@ async function convertMp4ToWebM(file) {
     },
     error: e => { throw e; }
   });
-  videoDecoder.configure({ codec: firstDesc.codec });
+  const decoderConfig = { codec: videoCodecString };
+  if (videoCodecConfig) {
+    decoderConfig.description = videoCodecConfig;
+  }
+  videoDecoder.configure(decoderConfig);
 
-  // 4. Decode → Re-encode pipeline
-  for (const s of samples) {
+  // 5. Decode → Re-encode pipeline
+  for (const sample of samples) {
     const chunk = new EncodedVideoChunk({
-      type: s.is_rap ? 'key' : 'delta',
-      timestamp: s.cts,
-      data: s.data
+      type: sample.is_rap ? 'key' : 'delta',
+      timestamp: sample.cts,
+      data: sample.data
     });
     videoDecoder.decode(chunk);
   }
   await videoDecoder.flush();
   await videoEncoder.flush();
 
-  // 5. Finalize muxer & download
-  muxer.finalize();                        // finalize container
-  const { buffer: webmBuffer } = muxer.target; // extract the ArrayBuffer
+  // 6. Finalize & download
+  muxer.finalize();
+  const { buffer: webmBuffer } = muxer.target;
   const blob = new Blob([webmBuffer], { type: 'video/webm' });
   saveBlob(blob, file.name.replace(/\.mp4$/i, '.webm'));
   updateProgress(100);
