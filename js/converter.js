@@ -1,184 +1,383 @@
 import MP4Box from 'mp4box';
 import { Muxer, ArrayBufferTarget } from 'webm-muxer';
 
-const dropZone          = document.getElementById('drop-zone');
-const fileInput         = document.getElementById('file-input');
+// Get DOM elements
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
 const progressContainer = document.getElementById('progress-container');
-const progressBar       = document.getElementById('progress-bar');
+const progressBar = document.getElementById('progress-bar');
+const statusMessage = document.createElement('div');
+statusMessage.id = 'status-message';
+progressContainer.appendChild(statusMessage);
 
+// Set up event listeners
 dropZone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => e.target.files[0] && handleFile(e.target.files[0]));
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragover', e => { 
+  e.preventDefault(); 
+  e.stopPropagation();
+  dropZone.classList.add('dragover'); 
+});
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
+  e.stopPropagation();
   dropZone.classList.remove('dragover');
-  e.dataTransfer.files[0] && handleFile(e.dataTransfer.files[0]);
+  if (e.dataTransfer.files.length > 0) {
+    handleFile(e.dataTransfer.files[0]);
+  }
 });
 
+/**
+ * Handle the selected file and start conversion
+ * @param {File} file - The MP4 file to convert
+ */
 async function handleFile(file) {
-  if (file.type !== 'video/mp4') {
-    return alert('Please select an MP4 file.');
+  // Check if the file is an MP4
+  if (!file.type.includes('mp4') && !file.name.toLowerCase().endsWith('.mp4')) {
+    alert('Please select an MP4 file.');
+    return;
   }
+  
+  // Hide drop zone and show progress
   dropZone.hidden = true;
   progressContainer.hidden = false;
+  updateStatus('Starting conversion...');
+  
   try {
     await convertMp4ToWebM(file);
+    updateStatus('Conversion complete!');
   } catch (err) {
-    console.error(err);
-    alert('Conversion failed: ' + err.message);
+    console.error('Conversion error:', err);
+    updateStatus(`Error: ${err.message}`);
+    setTimeout(() => {
+      progressContainer.hidden = true;
+      dropZone.hidden = false;
+    }, 3000);
   }
 }
 
+/**
+ * Update the status message
+ * @param {string} message - Status message to display
+ */
+function updateStatus(message) {
+  statusMessage.textContent = message;
+}
+
+/**
+ * Convert MP4 to WebM using WebCodecs
+ * @param {File} file - The MP4 file to convert
+ */
 async function convertMp4ToWebM(file) {
-  // 1) Demux & collect all samples + track metadata
-  const { track, samples } = await demuxMp4(file);
-  const {
-    codec: codecString,
-    video: { width: trackWidth, height: trackHeight },
-    avcC,
-    nb_samples: totalSamples
-  } = track;
-
-  // 2) Build AVC ‘description’ from SPS/PPS for configure()
-  let descriptionBuffer = null;
-  if (avcC) {
-    const prefix = new Uint8Array([0,0,0,1]);
-    const parts = [];
-    for (const sps of avcC.sequenceParameterSets) {
-      parts.push(prefix, new Uint8Array(sps));
-    }
-    for (const pps of avcC.pictureParameterSets) {
-      parts.push(prefix, new Uint8Array(pps));
-    }
-    descriptionBuffer = concat(parts).buffer;
-  }
-
-  // 3) Check WebCodecs availability
+  // Check WebCodecs API availability
   if (!window.VideoDecoder || !window.VideoEncoder) {
     throw new Error('WebCodecs API not supported in this browser');
   }
 
-  // 4) Init WebM muxer
+  updateStatus('Demuxing MP4 file...');
+  
+  // 1) Demux the MP4 file and get video track data
+  const { track, samples } = await demuxMp4(file);
+  
+  if (!track || !samples || samples.length === 0) {
+    throw new Error('Failed to extract video samples from the MP4 file');
+  }
+  
+  updateStatus('Setting up conversion pipeline...');
+  
+  const {
+    codec: codecString,
+    video: { width: trackWidth, height: trackHeight },
+    avcC,
+    timescale,
+    nb_samples: totalSamples
+  } = track;
+
+  // 2) Build AVC description from SPS/PPS for decoder configuration
+  let descriptionBuffer = null;
+  if (avcC) {
+    const prefix = new Uint8Array([0, 0, 0, 1]);
+    const parts = [];
+    
+    for (const sps of avcC.sequenceParameterSets) {
+      parts.push(prefix, new Uint8Array(sps));
+    }
+    
+    for (const pps of avcC.pictureParameterSets) {
+      parts.push(prefix, new Uint8Array(pps));
+    }
+    
+    descriptionBuffer = concat(parts).buffer;
+  } else {
+    throw new Error('Missing codec configuration (avcC)');
+  }
+
+  // Calculate proper framerate
+  let frameRate = 30; // Default
+  if (track.moov && track.moov.mvhd && track.moov.mvhd.duration && track.moov.mvhd.timescale) {
+    const duration = track.moov.mvhd.duration / track.moov.mvhd.timescale;
+    if (duration > 0) {
+      frameRate = Math.round(totalSamples / duration);
+    }
+  }
+
+  // Use higher quality settings for better output
+  const bitrate = Math.max(1_500_000, track.bitrate || 0);
+
+  // 3) Initialize WebM muxer
   const muxer = new Muxer({
     target: new ArrayBufferTarget(),
     video: {
       codec: 'V_VP8',
       width: trackWidth,
       height: trackHeight,
-      frameRate: 30,
+      frameRate: frameRate,
     },
   });
 
-  // 5) Configure VideoEncoder
+  // 4) Create promise to track conversion completion
   let processed = 0;
+  
+  // 5) Configure VideoEncoder
   const encoder = new VideoEncoder({
     output: (chunk, meta) => {
       muxer.addVideoChunk(chunk, meta);
-      updateProgress(++processed / totalSamples * 100);
+      processed++;
+      
+      // Update progress every 5 frames or on multiples of 1%
+      if (processed % 5 === 0 || processed / totalSamples * 100 >= (Math.floor((processed - 1) / totalSamples * 100) + 1)) {
+        const percentage = Math.min(95, processed / totalSamples * 100);
+        updateProgress(percentage);
+        updateStatus(`Converting: ${processed}/${totalSamples} frames processed`);
+      }
     },
-    error: e => { throw e; }
+    error: e => { 
+      throw new Error(`Encoding error: ${e.message}`);
+    }
   });
-  encoder.configure({
+  
+  await encoder.configure({
     codec: 'vp8',
     width: trackWidth,
     height: trackHeight,
-    bitrate: 1_000_000,
-    framerate: 30,
+    bitrate: bitrate,
+    framerate: frameRate,
+    latencyMode: 'quality',
   });
 
-  // 6) Configure VideoDecoder (with codec + description)
+  // 6) Configure VideoDecoder
   const decoder = new VideoDecoder({
     output: frame => {
-      encoder.encode(frame);
+      encoder.encode(frame, { keyFrame: frame.type === 'key' });
       frame.close();
     },
-    error: e => { throw e; }
+    error: e => { 
+      throw new Error(`Decoding error: ${e.message}`);
+    }
   });
+  
   const decConfig = { codec: codecString };
-  if (descriptionBuffer) decConfig.description = descriptionBuffer;
-  decoder.configure(decConfig);
-
-  // 7) Push through decode→encode
-  for (const s of samples) {
-    const chunk = new EncodedVideoChunk({
-      type:      s.is_rap ? 'key' : 'delta',
-      timestamp: s.cts,
-      data:      s.data,
-    });
-    decoder.decode(chunk);
+  if (descriptionBuffer) {
+    decConfig.description = descriptionBuffer;
   }
-  await decoder.flush();
-  await encoder.flush();
+  
+  await decoder.configure(decConfig);
 
-  // 8) Finalize & download
-  muxer.finalize();
-  const { buffer: webmBuffer } = muxer.target;
-  const blob = new Blob([webmBuffer], { type: 'video/webm' });
-  saveBlob(blob, file.name.replace(/\.mp4$/i, '.webm'));
-  updateProgress(100);
+  // 7) Process all samples
+  updateStatus('Converting video frames...');
+  try {
+    for (const sample of samples) {
+      // Check if the sample data is valid
+      if (!sample.data || sample.data.byteLength === 0) {
+        console.warn('Skipping empty sample');
+        continue;
+      }
+      
+      const chunk = new EncodedVideoChunk({
+        type: sample.is_rap ? 'key' : 'delta',
+        timestamp: Math.round(sample.cts * 1000000 / timescale), // Convert to microseconds
+        duration: Math.round(sample.duration * 1000000 / timescale),
+        data: sample.data
+      });
+      
+      decoder.decode(chunk);
+    }
+    
+    updateStatus('Finalizing conversion...');
+    
+    // Wait for all frames to be processed
+    await decoder.flush();
+    await encoder.flush();
+    
+    // 8) Finalize and download
+    muxer.finalize();
+    const { buffer: webmBuffer } = muxer.target;
+    
+    if (!webmBuffer || webmBuffer.byteLength === 0) {
+      throw new Error('Generated WebM file is empty');
+    }
+    
+    const blob = new Blob([webmBuffer], { type: 'video/webm' });
+    const outputFilename = file.name.replace(/\.mp4$/i, '') + '.webm';
+    saveBlob(blob, outputFilename);
+    
+    updateProgress(100);
+    return true;
+    
+  } catch (error) {
+    throw new Error(`Processing error: ${error.message}`);
+  }
 }
 
+/**
+ * Concatenate multiple Uint8Array chunks
+ * @param {Array<Uint8Array>} chunks - Array of Uint8Array to concatenate
+ * @return {Uint8Array} Concatenated array
+ */
 function concat(chunks) {
   const total = chunks.reduce((sum, c) => sum + c.length, 0);
-  const out   = new Uint8Array(total);
-  let offset  = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
   }
+  
   return out;
 }
 
+/**
+ * Demux an MP4 file to extract video track and samples
+ * @param {File} file - The MP4 file to demux
+ * @return {Promise<Object>} Object containing track info and samples
+ */
 async function demuxMp4(file) {
-  const buffer = await file.arrayBuffer();
-  buffer.fileStart = 0;
-  const mp4boxFile = MP4Box.createFile();
+  try {
+    const buffer = await file.arrayBuffer();
+    buffer.fileStart = 0;
+    const mp4boxFile = MP4Box.createFile();
 
-  return new Promise((resolve, reject) => {
-    let trackInfo;
-    const samples = [];
+    return new Promise((resolve, reject) => {
+      let trackInfo;
+      const samples = [];
+      let timeoutId;
 
-    mp4boxFile.onError = err => reject(err);
-    mp4boxFile.onReady = info => {
-      trackInfo = info.tracks.find(t =>
-        t.type === 'video' && t.codec.startsWith('avc')
-      );
-      if (!trackInfo) {
-        return reject(new Error('No H.264 video track found'));
+      // Set timeout to prevent hanging
+      timeoutId = setTimeout(() => {
+        reject(new Error('Demuxing timed out after 30 seconds'));
+      }, 30000);
+
+      mp4boxFile.onError = err => {
+        clearTimeout(timeoutId);
+        reject(new Error(`MP4Box error: ${err}`));
+      };
+      
+      mp4boxFile.onReady = info => {
+        try {
+          if (!info || !info.tracks || info.tracks.length === 0) {
+            clearTimeout(timeoutId);
+            return reject(new Error('No tracks found in the MP4 file'));
+          }
+
+          // Look for H.264 video track
+          trackInfo = info.tracks.find(t => 
+            t.type === 'video' && (t.codec.startsWith('avc') || t.codec.startsWith('AVC'))
+          );
+
+          if (!trackInfo) {
+            clearTimeout(timeoutId);
+            return reject(new Error('No H.264 video track found in the file'));
+          }
+
+          mp4boxFile.setExtractionOptions(
+            trackInfo.id,
+            null,
+            { nbSamples: trackInfo.nb_samples }
+          );
+          
+          mp4boxFile.start();
+        } catch (e) {
+          clearTimeout(timeoutId);
+          reject(new Error(`Error processing MP4 header: ${e.message}`));
+        }
+      };
+
+      mp4boxFile.onSamples = (_id, _user, sArr) => {
+        try {
+          if (!sArr || sArr.length === 0) {
+            return;
+          }
+          
+          samples.push(...sArr);
+          
+          updateProgress(Math.min(30, samples.length / (trackInfo?.nb_samples || 100) * 30));
+          
+          if (samples.length >= (trackInfo?.nb_samples || 0)) {
+            clearTimeout(timeoutId);
+            resolve({ track: trackInfo, samples });
+          }
+        } catch (e) {
+          clearTimeout(timeoutId);
+          reject(new Error(`Error processing samples: ${e.message}`));
+        }
+      };
+
+      try {
+        mp4boxFile.appendBuffer(buffer);
+        mp4boxFile.flush();
+      } catch (e) {
+        clearTimeout(timeoutId);
+        reject(new Error(`Error appending buffer: ${e.message}`));
       }
-      mp4boxFile.setExtractionOptions(
-        trackInfo.id,
-        null,
-        { nbSamples: trackInfo.nb_samples }
-      );
-      mp4boxFile.start();
-    };
-
-    mp4boxFile.onSamples = (_id, _user, sArr) => {
-      samples.push(...sArr);
-      if (samples.length >= trackInfo.nb_samples) {
-        resolve({ track: trackInfo, samples });
-      }
-    };
-
-    mp4boxFile.appendBuffer(buffer);
-    mp4boxFile.flush();
-  });
+    });
+  } catch (err) {
+    throw new Error(`Failed to read file: ${err.message}`);
+  }
 }
 
+/**
+ * Update the progress bar
+ * @param {number} pct - Progress percentage (0-100)
+ */
 function updateProgress(pct) {
-  progressBar.style.width = `${pct}%`;
+  const percentage = Math.max(0, Math.min(100, pct));
+  progressBar.style.width = `${percentage}%`;
+  progressBar.setAttribute('aria-valuenow', percentage);
 }
 
+/**
+ * Save a blob as a file download
+ * @param {Blob} blob - Blob to save
+ * @param {string} filename - Filename to use
+ */
 function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = filename;
+  a.style.display = 'none';
+  
   document.body.appendChild(a);
   a.click();
+  
   setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
+    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    updateStatus(`Saved as ${filename}`);
+    
+    // Add reset button
+    const resetButton = document.createElement('button');
+    resetButton.textContent = 'Convert Another File';
+    resetButton.className = 'reset-button';
+    resetButton.onclick = () => {
+      progressContainer.hidden = true;
+      dropZone.hidden = false;
+      if (resetButton.parentNode) {
+        resetButton.parentNode.removeChild(resetButton);
+      }
+    };
+    progressContainer.appendChild(resetButton);
   }, 100);
 }
