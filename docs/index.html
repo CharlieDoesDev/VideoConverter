@@ -1,3 +1,22 @@
-<script src="js/mp4box.all.min.js"></script>
-<script src="js/webm-muxer.min.js"></script>
-<script src="js/converter.js"></script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MP4 → WebM Converter</title>
+  <link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+  <div class="container">
+    <h2>MP4 → WebM</h2>
+    <div id="drop-zone">Drop MP4 here or click to select</div>
+    <input type="file" id="file-input" accept="video/mp4" hidden/>
+    <div id="progress-container" hidden>
+      <div id="progress-bar"></div>
+    </div>
+  </div>
+
+  <!-- single UMD bundle with mp4box, webm-muxer, converter logic -->
+  <script src="js/vendor/bundle.js"></script>
+</body>
+</html>
