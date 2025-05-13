@@ -1,21 +1,25 @@
 // converter-ffmpegjs.js
+// ---------------------
 
-// 👀 We expect a global `Worker`-compatible script at converter-worker.js
+// 👀 Be sure your HTML includes:
+//   <progress id="progressBar" class="hidden" style="width:100%; margin-top:1em;"></progress>
+
 if (typeof Worker !== 'function') {
   throw new Error('This browser doesn’t support Web Workers.');
 }
 
-// UI refs
+// UI references
 const dropZone     = document.getElementById('dropZone');
 const fileInput    = document.getElementById('fileInput');
 const convertBtn   = document.getElementById('convertBtn');
 const statusDiv    = document.getElementById('status');
 const preview      = document.getElementById('preview');
 const downloadLink = document.getElementById('downloadLink');
+const progressBar  = document.getElementById('progressBar');
 
 let selectedFile = null;
 
-// Helpers
+// UI helper functions
 function showStatus(msg) {
   statusDiv.textContent = msg;
   statusDiv.classList.remove('hidden');
@@ -24,13 +28,14 @@ function hideStatus() {
   statusDiv.classList.add('hidden');
 }
 function resetUI() {
-  convertBtn.disabled = !selectedFile;
+  convertBtn.disabled    = !selectedFile;
   hideStatus();
   preview.classList.add('hidden');
   downloadLink.classList.add('hidden');
+  progressBar.classList.add('hidden');
 }
 
-// Drag & drop + file-picker
+// Drag & drop + click-to-select
 ;['dragover','dragleave','drop'].forEach(evt => {
   dropZone.addEventListener(evt, e => {
     e.preventDefault();
@@ -55,11 +60,13 @@ function handleFile(file) {
   resetUI();
 }
 
-// Create and wire up the Worker
+// Kick off the Worker
 const worker = new Worker('converter-worker.js');
 
 worker.onmessage = e => {
   if (e.data.type === 'done') {
+    progressBar.classList.add('hidden');
+
     const outFile = e.data.MEMFS.find(f => f.name === 'output.webm');
     if (!outFile) return showStatus('No output generated');
 
@@ -69,14 +76,15 @@ worker.onmessage = e => {
     preview.src = url;
     preview.classList.remove('hidden');
 
-    downloadLink.href = url;
-    downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
+    downloadLink.href        = url;
+    downloadLink.download    = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
     downloadLink.textContent = 'Download WebM';
     downloadLink.classList.remove('hidden');
 
     showStatus('Done!');
   }
   else if (e.data.type === 'error') {
+    progressBar.classList.add('hidden');
     showStatus('Conversion failed: ' + e.data.message);
   }
 };
@@ -87,15 +95,18 @@ convertBtn.addEventListener('click', async () => {
   resetUI();
   showStatus('Reading file…');
 
-  const buffer   = await selectedFile.arrayBuffer();
+  const buffer    = await selectedFile.arrayBuffer();
   const inputData = new Uint8Array(buffer);
 
-  showStatus('Converting…');
+  // Show indeterminate progress
+  progressBar.classList.remove('hidden');
+  progressBar.removeAttribute('value');
 
+  showStatus('Converting…');
   worker.postMessage({
     inputData,
     args: [
-      '-y',        // overwrite without asking
+      '-y',        // auto-overwrite
       '-nostdin',  // disable stdin prompts
       '-i','input.mp4',
       '-c:v','libvpx','-b:v','1M',
