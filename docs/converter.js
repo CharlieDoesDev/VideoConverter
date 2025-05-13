@@ -2,7 +2,6 @@
 // ────────────
 
 // 0️⃣  Load WebMWriter via require (must be bundled with a CommonJS shim)
-const WebMWriter = require('webm-writer');
 
 // UI refs
 const dropZone      = document.getElementById('dropZone');
@@ -78,6 +77,8 @@ convertBtn.addEventListener('click', async () => {
 
   // 2) Instantiate WebMWriter
   const quality = Math.max(0.1, parseFloat(qualitySlider.value));
+  const WebMWriter = require('webm-writer');
+
   const writer  = new WebMWriter({
     quality,
     fileWriter: null,
