@@ -186,7 +186,7 @@
     if (input instanceof ArrayBuffer) {
       ab = input; length = ab.byteLength;
     } else if (ArrayBuffer.isView(input)) {
-      ab = input.buffer;
+      ab = input.buffer; 
       offset = input.byteOffset;
       length = input.byteLength;
     } else {
