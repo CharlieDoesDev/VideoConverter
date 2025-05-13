@@ -15,6 +15,7 @@ const downloadLink = document.getElementById('downloadLink');
 const { createFFmpeg, fetchFile } = FFmpeg;
 const ffmpeg = createFFmpeg({
   log: true,
+  corePath: 'https://unpkg.com/@ffmpeg/core@0.11.8/dist/ffmpeg-core.js',
   progress: ({ ratio }) => {
     // Update progress bar and text
     const percent = (ratio * 100).toFixed(2);
