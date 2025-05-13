@@ -1,7 +1,7 @@
 // converter.js
 // ────────────
 
-// 0️⃣  Pull in the pure-ESM WebMWriter build
+// 0️⃣  Import the pure-ESM WebMWriter build
 import WebMWriter from 'https://cdn.skypack.dev/webm-writer';
 
 // UI refs
@@ -64,7 +64,7 @@ convertBtn.addEventListener('click', async () => {
 
   showStatus('Preparing video…');
 
-  // 1) Load video element
+  // 1) Load the MP4 into a hidden video element
   const video = document.createElement('video');
   video.src = URL.createObjectURL(selectedFile);
   video.muted = true;
@@ -75,41 +75,50 @@ convertBtn.addEventListener('click', async () => {
   });
 
   const fps = video.frameRate || 30;
-  const duration = video.duration;
-  const totalFrames = Math.ceil(fps * duration);
 
   // 2) Setup WebMWriter with WebCodecs
   const quality = Math.max(0.1, parseFloat(qualitySlider.value));
+  var WebMWriter = require('webm-writer');
   const writer  = new WebMWriter({
     quality,
     fileWriter: null,
-    codec: 'vp9',         // use vp9 for better compression
+    codec: 'vp9',
     frameRate: fps,
     disableWebAssembly: true
   });
 
-  // 3) Draw & encode each frame
+  // 3) Draw & encode frames until video ends
   const canvas = document.createElement('canvas');
   canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
   const ctx = canvas.getContext('2d');
 
   let frameCount = 0;
-  showStatus(`Encoding 0 / ${totalFrames}`);
+  showStatus(`Encoding…`);
 
   const renderFrame = () => {
-    if (video.ended || frameCount >= totalFrames) {
+    if (video.ended) {
       finish();
       return;
     }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     writer.addFrame(canvas);
     frameCount++;
-    showStatus(`Encoding ${frameCount} / ${totalFrames}`);
-    video.requestVideoFrameCallback(renderFrame);
+    showStatus(`Encoded ${frameCount} frames…`);
+
+    if ('requestVideoFrameCallback' in video) {
+      video.requestVideoFrameCallback(renderFrame);
+    } else {
+      setTimeout(renderFrame, 1000 / fps);
+    }
   };
 
-  renderFrame();
+  // start encoding loop
+  if (video.readyState >= 2) {
+    renderFrame();
+  } else {
+    video.addEventListener('loadeddata', () => renderFrame(), { once: true });
+  }
 
   async function finish() {
     showStatus('Finalizing WebM…');
