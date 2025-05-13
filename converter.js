@@ -2,10 +2,10 @@
 // index.html must include mp4box.js and webm-muxer UMD before this script.
 
 (async function() {
-  const { Muxer } = WebMMuxer;              // grab the muxer
+  const { Muxer, ArrayBufferTarget } = WebMMuxer;
   const { createFile: createMP4BoxFile } = MP4Box;
 
-  // UI elements
+  // UI refs
   const dropzone        = document.getElementById('dropzone');
   const fileInput       = document.getElementById('fileInput');
   const progressWrapper = document.getElementById('progress-container');
@@ -13,12 +13,14 @@
   const statusText      = document.getElementById('status-text');
   const outputDiv       = document.getElementById('output');
 
+  // Check WebCodecs
   if (!window.VideoDecoder || !window.VideoEncoder) {
     dropzone.textContent = 'WebCodecs not supported in this browser.';
     dropzone.style.cursor = 'not-allowed';
     return;
   }
 
+  // UI helpers
   function resetUI() {
     progressBar.style.width = '0%';
     statusText.textContent = '';
@@ -33,12 +35,12 @@
   }
   resetUI();
 
-  // drag & drop + click
+  // Drag & drop + click
   ;['dragover','dragleave','drop'].forEach(evt => {
     dropzone.addEventListener(evt, e => {
       e.preventDefault();
-      dropzone.classList.toggle('dragover', evt === 'dragover');
-      if (evt === 'drop' && e.dataTransfer.files[0]) {
+      dropzone.classList.toggle('dragover', evt==='dragover');
+      if (evt==='drop' && e.dataTransfer.files[0]) {
         handleFile(e.dataTransfer.files[0]);
       }
     });
@@ -48,6 +50,7 @@
     if (fileInput.files[0]) handleFile(fileInput.files[0]);
   });
 
+  // Main conversion
   async function handleFile(file) {
     if (!file.name.toLowerCase().endsWith('.mp4')) {
       alert('Please select an MP4 file.');
@@ -58,59 +61,82 @@
     updateProgress(0, 'Reading…');
 
     try {
-      // 1) Demux
+      // 1) Demux mp4
       updateProgress(5, 'Demuxing…');
       const { track, samples } = await demuxMp4(file);
       const totalSamples = samples.length;
       updateProgress(20, 'Demux complete');
 
       // 2) Build decoder config
-      let decCfg = { codec: track.codec };
-      if (track.video) {
-        decCfg.codedWidth  = track.video.width;
-        decCfg.codedHeight = track.video.height;
-      }
-      // H.264 SPS/PPS
+      let decCfg = {
+        codec: track.codec,
+        codedWidth:  track.video?.width,
+        codedHeight: track.video?.height
+      };
+
+      // Always get SPS/PPS for H.264
       if (track.codec.startsWith('avc1')) {
-        const spspps = track.avcC
-          ? (() => {
-              const prefix = new Uint8Array([0,0,0,1]);
-              const parts = [];
-              track.avcC.sequenceParameterSets.forEach(sps => parts.push(prefix, new Uint8Array(sps)));
-              track.avcC.pictureParameterSets.forEach(pps => parts.push(prefix, new Uint8Array(pps)));
-              return concat(parts).buffer;
-            })()
-          : extractSpsPps(samples[0].data);
-        if (!spspps) throw new Error('Cannot extract H.264 SPS/PPS');
+        let spspps;
+        if (track.avcC) {
+          const prefix = new Uint8Array([0,0,0,1]);
+          const parts = [];
+          track.avcC.sequenceParameterSets.forEach(sps => parts.push(prefix, new Uint8Array(sps)));
+          track.avcC.pictureParameterSets.forEach(pps => parts.push(prefix, new Uint8Array(pps)));
+          spspps = concat(parts).buffer;
+        } else {
+          spspps = extractSpsPps(samples[0].data);
+          if (!spspps) {
+            throw new Error('Cannot extract H.264 SPS/PPS');
+          }
+        }
         decCfg.description = spspps;
       }
-      // HEVC, VP9, AV1 from their config boxes
-      if (track.codec.startsWith('hvc1') && track.hvcC?.buffer) decCfg.description = track.hvcC.buffer;
-      if (track.codec.startsWith('vp09') && track.vpcC?.buffer) decCfg.description = track.vpcC.buffer;
-      if (track.codec.startsWith('av01') && track.av1C?.buffer) decCfg.description = track.av1C.buffer;
 
-      // 3) Check support & fallback H.264 profile
-      updateProgress(25, 'Checking support…');
-      let sup = await VideoDecoder.isConfigSupported(decCfg);
-      if (!sup.supported && track.codec.startsWith('avc1')) {
-        console.warn('Falling back to H.264 Baseline profile');
-        decCfg.codec = 'avc1.42001E';
-        sup = await VideoDecoder.isConfigSupported(decCfg);
+      // HEVC
+      if (track.codec.startsWith('hvc1') && track.hvcC?.buffer) {
+        decCfg.description = track.hvcC.buffer;
       }
-      if (!sup.supported) throw new Error(`Cannot decode ${decCfg.codec}`);
+      // VP9
+      if (track.codec.startsWith('vp09') && track.vpcC?.buffer) {
+        decCfg.description = track.vpcC.buffer;
+      }
+      // AV1
+      if (track.codec.startsWith('av01') && track.av1C?.buffer) {
+        decCfg.description = track.av1C.buffer;
+      }
 
-      // VP8 encode settings
+      // 3) Check decoder support and fallback profile if needed
+      updateProgress(25, 'Checking codec support…');
+      let support = await VideoDecoder.isConfigSupported(decCfg);
+      if (!support.supported && track.codec.startsWith('avc1')) {
+        console.warn(`Profile ${track.codec} unsupported; falling back to Baseline`);
+        decCfg.codec = 'avc1.42001E';  // Baseline Profile Level 3.0
+        support = await VideoDecoder.isConfigSupported(decCfg);
+      }
+      if (!support.supported) {
+        throw new Error(`Cannot decode ${decCfg.codec}`);
+      }
+
+      // 4) Check encoder support (VP8) with bitrate/framerate
       const framerate = 30;
       const bitrate   = track.bitrate || 1_000_000;
-      const encCfg = { codec: 'vp8', width: track.video.width, height: track.video.height, framerate, bitrate };
+      const encCfg = {
+        codec: 'vp8',
+        width: track.video.width,
+        height: track.video.height,
+        bitrate,
+        framerate
+      };
       const encSup = await VideoEncoder.isConfigSupported(encCfg);
-      if (!encSup.supported) throw new Error('VP8 encoding not supported');
+      if (!encSup.supported) {
+        throw new Error('VP8 encoding not supported.');
+      }
 
-      // 4) Init muxer/decoder/encoder
-      updateProgress(30, 'Initializing…');
+      // 5) Init muxer, decoder, encoder
+      updateProgress(30, 'Initializing codecs…');
       const muxer = new Muxer({
-        target: 'buffer',   // let muxer own its buffer
-        video: { codec: 'V_VP8', width: track.video.width, height: track.video.height }
+        target: new ArrayBufferTarget(),
+        video:  { codec:'V_VP8', width:track.video.width, height:track.video.height }
       });
 
       let decodedCount = 0;
@@ -129,32 +155,33 @@
       decoder.configure(decCfg);
 
       const encoder = new VideoEncoder({
-        output: chunk => muxer.addVideoChunk(chunk),
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
         error: e => { throw e; }
       });
       encoder.configure(encCfg);
 
-      // 5) Transcode all samples (convert to Annex-B)
+      // 6) Feed samples (convert each to Annex-B)
       updateProgress(35, 'Transcoding…');
       for (const s of samples) {
         const raw = mp4ToAnnexB(s.data);
-        const evc = new EncodedVideoChunk({
+        const chunk = new EncodedVideoChunk({
           type:      s.is_rap ? 'key' : 'delta',
-          timestamp: Math.round(s.cts * (1e6 / track.timescale)),
+          timestamp: Math.round(s.cts * (1e6/track.timescale)),
           data:      raw
         });
-        decoder.decode(evc);
+        decoder.decode(chunk);
       }
 
-      // 6) Drain and finalize
+      // 7) Flush & finalize
       await decoder.flush();
       await encoder.flush();
       updateProgress(95, 'Finalizing…');
-      const webmBuf = muxer.finalize();             // Uint8Array
-      const blob    = new Blob([webmBuf], { type:'video/webm' });
-      const url     = URL.createObjectURL(blob);
-      const outName = file.name.replace(/\.mp4$/i,'') + '.webm';
-      outputDiv.innerHTML = `<a href="${url}" download="${outName}">Download WebM</a>`;
+      const webm = muxer.finalize();
+      const blob = new Blob([webm], { type:'video/webm' });
+      const url  = URL.createObjectURL(blob);
+      const name = file.name.replace(/\.mp4$/i,'') + '.webm';
+
+      outputDiv.innerHTML = `<a href="${url}" download="${name}">Download WebM</a>`;
       updateProgress(100, 'Done');
     }
     catch (err) {
@@ -164,31 +191,29 @@
     }
   }
 
-  // Demux MP4 → { track, samples }
+  // Demux helper
   async function demuxMp4(file) {
-    const buf = await file.arrayBuffer();
-    buf.fileStart = 0;
+    const ab = await file.arrayBuffer();
+    ab.fileStart = 0;
     const mp4 = createMP4BoxFile();
     let trackInfo, samples = [];
 
     return new Promise((res, rej) => {
       mp4.onError = e => rej(e);
       mp4.onReady = info => {
-        trackInfo = info.tracks.find(t => t.video);
+        trackInfo = info.tracks.find(t=>t.video);
         if (!trackInfo) return rej(new Error('No video track'));
-        mp4.setExtractionOptions(trackInfo.id, null, {
-          nbSamples: trackInfo.nb_samples,
-          rapAlignement: true
-        });
+        mp4.setExtractionOptions(
+          trackInfo.id, null,
+          { nbSamples: trackInfo.nb_samples, rapAlignement: true }
+        );
         mp4.start();
       };
-      mp4.onSamples = (_id, _usr, arr) => samples.push(...arr);
+      mp4.onSamples = (_id, _u, arr) => samples.push(...arr);
       try {
-        mp4.appendBuffer(buf);
+        mp4.appendBuffer(ab);
         mp4.flush();
-      } catch(e) {
-        rej(e);
-      }
+      } catch(e) { rej(e); }
       (function waitAll() {
         if (trackInfo && samples.length >= trackInfo.nb_samples) {
           res({ track: trackInfo, samples });
@@ -199,21 +224,22 @@
     });
   }
 
-  // Convert length-prefixed NALs → Annex-B Uint8Array
+  // Convert MP4 length-prefixed NALs → Annex-B Uint8Array
   function mp4ToAnnexB(input) {
-    const buffer = input instanceof ArrayBuffer
+    const buf = input instanceof ArrayBuffer
       ? input
       : ArrayBuffer.isView(input)
-        ? input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength)
-        : new ArrayBuffer(0);
-    const dv = new DataView(buffer);
+        ? input.buffer
+        : null;
+    if (!buf) return new Uint8Array();
+    const dv = new DataView(buf, input.byteOffset||0, input.byteLength||buf.byteLength);
     const parts = [];
     const prefix = new Uint8Array([0,0,0,1]);
     let pos = 0;
     while (pos + 4 <= dv.byteLength) {
       const size = dv.getUint32(pos); pos += 4;
       if (pos + size > dv.byteLength) break;
-      parts.push(prefix, new Uint8Array(buffer, pos, size));
+      parts.push(prefix, new Uint8Array(dv.buffer, dv.byteOffset+pos, size));
       pos += size;
     }
     return concat(parts);
@@ -244,14 +270,14 @@
     return concat(parts).buffer;
   }
 
-  // Concatenate many Uint8Arrays
-  function concat(arrays) {
-    let total = arrays.reduce((sum,a)=>sum+a.length, 0);
-    const out = new Uint8Array(total);
-    let offs = 0;
-    for (const a of arrays) {
-      out.set(a, offs);
-      offs += a.length;
+  // Concatenate Uint8Arrays
+  function concat(arr) {
+    let len = arr.reduce((sum,a)=>sum+a.length,0);
+    const out = new Uint8Array(len);
+    let off = 0;
+    for (const a of arr) {
+      out.set(a, off);
+      off += a.length;
     }
     return out;
   }
