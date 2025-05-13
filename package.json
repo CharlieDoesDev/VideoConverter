@@ -2,18 +2,9 @@
   "name": "mp4-to-webm-converter",
   "version": "1.0.0",
   "scripts": {
-    "build": "rollup -c",
-    "serve": "npx serve docs"
-  },
-  "dependencies": {
-    "@ffmpeg/ffmpeg": "^0.12.6",
-    "@ffmpeg/util":  "^0.12.6"
+    "serve": "npx serve ."
   },
   "devDependencies": {
-    "@rollup/plugin-commonjs": "^24.0.0",
-    "@rollup/plugin-node-resolve": "^15.0.0",
-    "rollup": "^3.0.0",
-    "rollup-plugin-copy": "^4.0.0",
     "serve": "^14.0.0"
   }
 }
