@@ -1,8 +1,7 @@
 // converter.js
 // ────────────
 // Pull ffmpeg.wasm as an ES module from Skypack
-import { createFFmpeg, fetchFile }
-  from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg';
+import { createFFmpeg, fetchFile } from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/ffmpeg.min.js?module';
 
 const ffmpeg = createFFmpeg({ log: true });
 
