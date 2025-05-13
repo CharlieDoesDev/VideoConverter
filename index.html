@@ -9,12 +9,11 @@
   <div class="container">
     <h1>MP4 to WebM Converter</h1>
 
-    <!-- Drag-and-drop zone (clickable to trigger file input) -->
+    <!-- Drag-and-drop zone -->
     <div id="dropZone">Drag &amp; drop an MP4 video here, or click to select a file</div>
-    <!-- Hidden file input (triggered by drop zone) -->
     <input type="file" id="fileInput" accept="video/mp4" hidden />
 
-    <!-- Quality slider control -->
+    <!-- Quality slider -->
     <div class="quality-controls">
       <label for="qualitySlider">Quality:</label>
       <input type="range" id="qualitySlider" min="50" max="150" value="100" />
@@ -24,13 +23,13 @@
     <!-- Convert button -->
     <button id="convertBtn" disabled>Convert to WebM</button>
 
-    <!-- Progress bar and status message -->
+    <!-- Progress bar + status -->
     <div id="progressContainer" class="hidden">
       <progress id="progressBar" value="0" max="100"></progress>
       <span id="progressText">0%</span>
     </div>
 
-    <!-- Output video preview and download link -->
+    <!-- Output preview + download -->
     <div id="output" class="hidden">
       <h2>Output:</h2>
       <video id="outputVideo" controls playsinline></video><br />
@@ -38,9 +37,9 @@
     </div>
   </div>
 
-  <!-- 1) FFmpeg.wasm UMD -->
+  <!-- 1) Load FFmpeg.wasm UMD (defines global `FFmpeg`) -->
   <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.8/dist/ffmpeg.min.js"></script>
-  <!-- Our converter script -->
+  <!-- 2) Then load your new converter logic -->
   <script src="converter-ffmpeg.js"></script>
 </body>
 </html>
