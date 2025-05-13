@@ -6,9 +6,10 @@
   <title>MP4 to WebM Converter</title>
   <!-- Include CSS for styling -->
   <link rel="stylesheet" href="style.css" />
-  <!-- UMD scripts for mp4box.js and webm-muxer -->
-  <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2/build/webm-muxer.js"></script>
+  <!-- index.html -->
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.8/dist/ffmpeg.min.js"></script>
+  <script src="converter-ffmpeg.js"></script>
+
   <!-- Converter logic -->
   <script defer src="converter.js"></script>
 </head>
