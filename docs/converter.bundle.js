@@ -1,9 +1,7 @@
-// converter.js
-// ────────────
+import { FFmpeg } from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.6';
+import { toBlobURL, fetchFile } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.6';
 
-// 1️⃣  Imports from Skypack (ESM + CORS-friendly)
-import { FFmpeg }               from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.6';
-import { fetchFile, toBlobURL } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.6';
+// converter.js
 
 // 2️⃣  Instantiate the class-based API (v0.12+)
 const ffmpeg = new FFmpeg({ log: true });
@@ -153,3 +151,4 @@ convertBtn.addEventListener('click', async () => {
 
 // Initial UI state
 resetUI();
+//# sourceMappingURL=converter.bundle.js.map
