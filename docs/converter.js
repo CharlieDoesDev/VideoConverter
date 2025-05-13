@@ -77,7 +77,7 @@ convertBtn.addEventListener('click', async () => {
 
   // 2) Instantiate WebMWriter
   const quality = Math.max(0.1, parseFloat(qualitySlider.value));
-  var WebMWriter = require('webm-writer');
+  const WebMWriter = require('webm-writer');
 
   const writer  = new WebMWriter({
     quality,
