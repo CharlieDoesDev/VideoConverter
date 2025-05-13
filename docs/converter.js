@@ -2,7 +2,7 @@
 // ────────────
 
 // 0️⃣  Pull in the ESM build of webm-writer v3.1
-import WebMWriter from 'https://unpkg.com/webm-writer@3.1.0/dist/webm-writer.esm.js';
+import WebMWriter from 'https://cdn.skypack.dev/webm-writer@0.3.1';
 
 // UI refs
 const dropZone      = document.getElementById('dropZone');
