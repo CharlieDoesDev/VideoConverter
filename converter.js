@@ -1,9 +1,8 @@
 // converter.js
 // ────────────
-// Pull ffmpeg.wasm as an ES module from UNPKG. The "?module" flag tells unpkg
-// to serve the package’s ESM entrypoint (respecting its "module" field).
-import { createFFmpeg, fetchFile } 
-  from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15?module';
+// Pull ffmpeg.wasm as an ES module from Skypack
+import { createFFmpeg, fetchFile }
+  from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg';
 
 const ffmpeg = createFFmpeg({ log: true });
 
