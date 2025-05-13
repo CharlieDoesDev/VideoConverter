@@ -1,13 +1,11 @@
 // converter.js
-// Dependencies (in index.html):
-// <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
-// <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2/build/webm-muxer.js"></script>
+// index.html must include mp4box.js and webm-muxer UMD before this script.
 
 (async function() {
   const { Muxer, ArrayBufferTarget } = WebMMuxer;
   const { createFile: createMP4BoxFile } = MP4Box;
 
-  // DOM refs
+  // UI refs
   const dropzone        = document.getElementById('dropzone');
   const fileInput       = document.getElementById('fileInput');
   const progressWrapper = document.getElementById('progress-container');
@@ -15,14 +13,12 @@
   const statusText      = document.getElementById('status-text');
   const outputDiv       = document.getElementById('output');
 
-  // Ensure WebCodecs support
   if (!window.VideoDecoder || !window.VideoEncoder) {
-    dropzone.textContent = 'Your browser does not support WebCodecs.';
+    dropzone.textContent = 'Your browser doesn’t support WebCodecs';
     dropzone.style.cursor = 'not-allowed';
     return;
   }
 
-  // UI helpers
   function resetUI() {
     progressBar.style.width = '0%';
     statusText.textContent = '';
@@ -32,12 +28,12 @@
     dropzone.textContent = 'Drag & drop an MP4 here, or click to select';
   }
   function updateProgress(pct, msg) {
-    progressBar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+    progressBar.style.width = `${Math.min(100, Math.max(0, pct))}%`;
     statusText.textContent = msg || '';
   }
   resetUI();
 
-  // Wire up drag & drop + click
+  // Drag & drop & click
   ;['dragover','dragleave','drop'].forEach(evt => {
     dropzone.addEventListener(evt, e => {
       e.preventDefault();
@@ -57,33 +53,34 @@
     }
     dropzone.classList.add('disabled');
     progressWrapper.classList.remove('hidden');
-    updateProgress(0, 'Loading…');
+    updateProgress(0, 'Reading file…');
 
     try {
-      // 1. Demux MP4
+      // 1) Demux
       updateProgress(5, 'Demuxing MP4…');
       const { track, samples } = await demuxMp4(file);
-      const totalSamples = samples.length;
+      const total = samples.length;
       updateProgress(20, 'Demux complete');
 
-      // 2. Build decoder config
+      // 2) Build decoderConfig
       const decCfg = { codec: track.codec };
-      if (track.video?.width && track.video?.height) {
+      if (track.video) {
         decCfg.codedWidth  = track.video.width;
         decCfg.codedHeight = track.video.height;
       }
-      // H.264 (avc1) out-of-band config or fallback in-band
+
       if (track.codec.startsWith('avc1')) {
+        // Out-of-band avcC if present
         if (track.avcC) {
           const prefix = new Uint8Array([0,0,0,1]);
           const parts = [];
-          track.avcC.sequenceParameterSets.forEach(s => parts.push(prefix, new Uint8Array(s)));
-          track.avcC.pictureParameterSets   .forEach(p => parts.push(prefix, new Uint8Array(p)));
+          track.avcC.sequenceParameterSets.forEach(sps => parts.push(prefix, new Uint8Array(sps)));
+          track.avcC.pictureParameterSets   .forEach(pps => parts.push(prefix, new Uint8Array(pps)));
           decCfg.description = concat(parts).buffer;
         } else {
-          // fallback: extract SPS/PPS from first sample
+          // Fallback: extract from first sample
           const desc = extractSpsPps(samples[0].data);
-          if (!desc) throw new Error('Cannot extract SPS/PPS');
+          if (!desc) throw new Error('Unable to extract H.264 SPS/PPS');
           decCfg.description = desc;
         }
       }
@@ -100,16 +97,16 @@
         decCfg.description = track.av1C.buffer;
       }
 
-      // 3. Capability checks
+      // 3) Capability checks
       updateProgress(25, 'Checking codec support…');
-      const decSup = await VideoDecoder.isConfigSupported(decCfg);
-      if (!decSup.supported) throw new Error(`Decoding ${track.codec} not supported.`);
+      const { supported: decOk } = await VideoDecoder.isConfigSupported(decCfg);
+      if (!decOk) throw new Error(`Cannot decode ${track.codec}`);
       const encCfg = { codec:'vp8', width:track.video.width, height:track.video.height };
-      const encSup = await VideoEncoder.isConfigSupported(encCfg);
-      if (!encSup.supported) throw new Error('VP8 encoding not supported.');
+      const { supported: encOk } = await VideoEncoder.isConfigSupported(encCfg);
+      if (!encOk) throw new Error('VP8 encoding not supported');
 
-      // 4. Init muxer, decoder, encoder
-      updateProgress(30, 'Initializing…');
+      // 4) Init
+      updateProgress(30, 'Initializing codecs…');
       const muxer = new Muxer({
         target: new ArrayBufferTarget(),
         video:  { codec:'V_VP8', width:track.video.width, height:track.video.height }
@@ -121,8 +118,10 @@
           encoder.encode(frame);
           frame.close();
           decoded++;
-          updateProgress(30 + Math.round((decoded/totalSamples)*60),
-                         `Transcoding frame ${decoded}/${totalSamples}…`);
+          updateProgress(
+            30 + (decoded/total)*60,
+            `Transcoding frame ${decoded}/${total}…`
+          );
         },
         error: e => { throw e; }
       });
@@ -134,26 +133,26 @@
       });
       encoder.configure(encCfg);
 
-      // 5. Feed samples
-      updateProgress(35, 'Feeding samples…');
+      // 5) Decode→Encode
+      updateProgress(35, 'Processing samples…');
       for (const s of samples) {
         const data = new Uint8Array(s.data);
         const chunk = new EncodedVideoChunk({
-          type:      s.is_rap ? 'key' : 'delta',
+          type:      s.is_rap ? 'key':'delta',
           timestamp: Math.round(s.cts * (1e6/track.timescale)),
           data
         });
         decoder.decode(chunk);
       }
 
-      // 6. Flush & finalize
+      // 6) Flush & finish
       await decoder.flush();
       await encoder.flush();
       updateProgress(95, 'Finalizing…');
-      const webmBuf = muxer.finalize();
-      const blob    = new Blob([webmBuf], { type:'video/webm' });
-      const url     = URL.createObjectURL(blob);
-      const name    = file.name.replace(/\.mp4$/i, '') + '.webm';
+      const webmBuffer = muxer.finalize();
+      const blob       = new Blob([webmBuffer], { type:'video/webm' });
+      const url        = URL.createObjectURL(blob);
+      const name       = file.name.replace(/\.mp4$/i,'') + '.webm';
 
       outputDiv.innerHTML = `<a href="${url}" download="${name}">Download WebM</a>`;
       updateProgress(100, 'Done');
@@ -165,32 +164,29 @@
     }
   }
 
-  // Demux helper
+  // --- helpers ---
+
+  // Demux MP4 → track & samples
   async function demuxMp4(file) {
     const buf = await file.arrayBuffer();
     buf.fileStart = 0;
     const mp4 = createMP4BoxFile();
     let trackInfo, samples = [];
-
     return new Promise((res, rej) => {
       mp4.onError = e => rej(e);
       mp4.onReady = info => {
-        trackInfo = info.tracks.find(t => t.video);
+        trackInfo = info.tracks.find(t=>t.video);
         if (!trackInfo) return rej(new Error('No video track'));
-        mp4.setExtractionOptions(trackInfo.id, null,
-                                 { nbSamples:trackInfo.nb_samples, rapAlignement:true });
+        mp4.setExtractionOptions(
+          trackInfo.id, null,
+          { nbSamples:trackInfo.nb_samples, rapAlignement:true }
+        );
         mp4.start();
       };
-      mp4.onSamples = (_id, _usr, arr) => samples.push(...arr);
-
-      try {
-        mp4.appendBuffer(buf);
-        mp4.flush();
-      } catch(e) {
-        rej(e);
-      }
-
-      ;(function wait() {
+      mp4.onSamples = (_id,_u,arr) => samples.push(...arr);
+      try { mp4.appendBuffer(buf); mp4.flush(); }
+      catch(e) { rej(e); }
+      (function wait() {
         if (trackInfo && samples.length >= trackInfo.nb_samples) {
           res({ track: trackInfo, samples });
         } else setTimeout(wait, 50);
@@ -198,19 +194,19 @@
     });
   }
 
-  // Convert length-prefixed NALs to Annex-B SPS/PPS extractor
+  // Extract SPS+PPS from first H.264 sample buffer
   function extractSpsPps(buffer) {
     const dv = new DataView(buffer), parts = [];
-    let offset = 0;
+    let off = 0;
     const prefix = new Uint8Array([0,0,0,1]);
-    // grab first two NALs (SPS=7, PPS=8)
-    while (parts.length < 2 && offset + 4 <= dv.byteLength) {
-      const size = dv.getUint32(offset); offset += 4;
-      if (offset + size > dv.byteLength) break;
-      const nal = new Uint8Array(buffer, offset, size);
-      const type = nal[0] & 0x1f;
-      if (type === 7 || type === 8) parts.push(prefix, nal);
-      offset += size;
+    // collect two NALs
+    while (parts.length < 2 && off + 4 <= dv.byteLength) {
+      const size = dv.getUint32(off); off += 4;
+      if (off + size > dv.byteLength) break;
+      const nal = new Uint8Array(buffer, off, size);
+      const t = nal[0] & 0x1f;
+      if (t === 7 || t === 8) parts.push(prefix, nal);
+      off += size;
     }
     if (parts.length < 2) return null;
     return concat(parts).buffer;
@@ -218,8 +214,8 @@
 
   // Concatenate many Uint8Arrays
   function concat(arrays) {
-    let length = arrays.reduce((sum, a) => sum + a.length, 0);
-    const out = new Uint8Array(length);
+    let len = arrays.reduce((sum,a)=>sum+a.length,0);
+    const out = new Uint8Array(len);
     let pos = 0;
     for (const a of arrays) {
       out.set(a, pos);
@@ -227,4 +223,5 @@
     }
     return out;
   }
+
 })();
