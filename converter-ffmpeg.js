@@ -1,146 +1,107 @@
-// converter-ffmpeg.js
+// converter-ffmpegjs.js
 
-// 1) Initialize FFmpeg.wasm with single-thread core
-const { createFFmpeg, fetchFile } = FFmpeg;
-const ffmpeg = createFFmpeg({
-  log: true,
-  corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.12.15/dist/ffmpeg-core.js'
-});
-
-// 2) UI element references
-const dropZone        = document.getElementById('dropZone');
-const fileInput       = document.getElementById('fileInput');
-const qualitySlider   = document.getElementById('qualitySlider');
-const qualityLabel    = document.getElementById('qualityLabel');
-const convertBtn      = document.getElementById('convertBtn');
-const progressContainer = document.getElementById('progressContainer');
-const progressBar     = document.getElementById('progressBar');
-const progressText    = document.getElementById('progressText');
-const outputSection   = document.getElementById('output');
-const outputVideo     = document.getElementById('outputVideo');
-const downloadLink    = document.getElementById('downloadLink');
+// UI references
+const dropZone    = document.getElementById('dropZone');
+const fileInput   = document.getElementById('fileInput');
+const convertBtn  = document.getElementById('convertBtn');
+const statusDiv   = document.getElementById('status');
+const preview     = document.getElementById('preview');
+const downloadLink= document.getElementById('downloadLink');
 
 let selectedFile = null;
-let originalDuration = 0;
 
-// 3) UI helper functions
+// Helpers
+function showStatus(msg) {
+  statusDiv.textContent = msg;
+  statusDiv.classList.remove('hidden');
+}
+function hideStatus() {
+  statusDiv.classList.add('hidden');
+}
 function resetUI() {
-  progressBar.value = 0;
-  progressText.textContent = '0%';
-  progressContainer.classList.add('hidden');
-  outputSection.classList.add('hidden');
   convertBtn.disabled = !selectedFile;
-}
-function updateProgress(ratio, msg = '') {
-  const pct = (ratio * 100).toFixed(2);
-  progressBar.value = pct;
-  progressText.textContent = msg || `${pct}%`;
+  hideStatus();
+  preview.classList.add('hidden');
+  downloadLink.classList.add('hidden');
 }
 
-// 4) Quality slider event
-qualitySlider.addEventListener('input', () => {
-  qualityLabel.textContent = `${qualitySlider.value}%`;
-});
-
-// 5) Drag & drop and click handlers
+// Drag & drop & click handlers
 ;['dragover','dragleave','drop'].forEach(evt => {
   dropZone.addEventListener(evt, e => {
     e.preventDefault();
     dropZone.classList.toggle('hover', evt === 'dragover');
     if (evt === 'drop' && e.dataTransfer.files[0]) {
-      handleFileSelection(e.dataTransfer.files[0]);
+      handleFile(e.dataTransfer.files[0]);
     }
   });
 });
 dropZone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) handleFileSelection(fileInput.files[0]);
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
 });
 
-// 6) When a file is selected
-async function handleFileSelection(file) {
+// File selection
+function handleFile(file) {
   if (!file.name.toLowerCase().endsWith('.mp4')) {
-    alert('Please select an MP4 file.');
+    alert('Please select an MP4.');
     return;
   }
   selectedFile = file;
-  convertBtn.disabled = false;
   dropZone.textContent = `Selected: ${file.name}`;
-
-  // Load metadata to get duration
-  originalDuration = await getVideoDuration(file);
   resetUI();
 }
 
-// 7) Utility: get video duration
-function getVideoDuration(file) {
-  return new Promise(resolve => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.src = URL.createObjectURL(file);
-    v.onloadedmetadata = () => {
-      URL.revokeObjectURL(v.src);
-      resolve(v.duration);
-    };
-  });
-}
-
-// 8) Convert button click
+// Convert on button click
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
+  resetUI();
+  showStatus('Reading file…');
 
-  // Load FFmpeg core if needed
-  if (!ffmpeg.isLoaded()) {
-    progressContainer.classList.remove('hidden');
-    progressText.textContent = 'Loading FFmpeg…';
-    await ffmpeg.load();
-  }
+  // 1) Load the file into memory
+  const arrayBuffer = await selectedFile.arrayBuffer();
+  const input = new Uint8Array(arrayBuffer);
 
-  // Show progress and reset
-  progressContainer.classList.remove('hidden');
-  updateProgress(0, 'Starting…');
-
-  // Write input into FFmpeg FS
-  const data = await fetchFile(selectedFile);
-  ffmpeg.FS('writeFile', 'input.mp4', data);
-
-  // Build scale filter and bitrate
-  const scaleFactor = qualitySlider.value / 100;
-  const scaleFilter = `scale=iw*${scaleFactor}:ih*${scaleFactor}`;
-  // Approximate total bitrate (in bits/sec)
-  let totalBitsPerSec = (selectedFile.size * 8) / originalDuration;
-  let videoBitsPerSec = totalBitsPerSec * scaleFactor;
-  const audioBitsPerSec = 128_000; // fixed 128 kbps
-  videoBitsPerSec = Math.max(videoBitsPerSec - audioBitsPerSec, 100_000);
-  const videoKbps = Math.floor(videoBitsPerSec / 1000);
-
-  // Run FFmpeg command
-  progressText.textContent = 'Converting…';
+  // 2) Run FFmpeg-js (synchronous)  
+  showStatus('Converting… (this may take a bit)');
+  let result;
   try {
-    await ffmpeg.run(
-      '-y',
-      '-i','input.mp4',
-      '-vf', scaleFilter,
-      '-c:v','libvpx',
-      '-b:v', `${videoKbps}k`,
-      '-c:a','libopus',
-      '-b:a','128k',
-      'output.webm'
-    );
-  } catch(err) {
+    result = FFmpeg({
+      arguments: [
+        '-i', 'input.mp4',
+        '-c:v', 'libvpx',          // VP8
+        '-b:v', '1M',              // 1 Mbps video
+        '-c:a', 'libopus',         // Opus audio
+        'output.webm'
+      ],
+      MEMFS: [{ name: 'input.mp4', data: input }],
+      // no print / printErr callbacks for this minimal example
+    });
+  } catch (err) {
     console.error(err);
-    progressText.textContent = 'Conversion error';
+    showStatus('Conversion failed: ' + err.message);
     return;
   }
 
-  // Read output and display
-  const outData = ffmpeg.FS('readFile', 'output.webm');
-  const blob   = new Blob([outData.buffer], { type: 'video/webm' });
-  const url    = URL.createObjectURL(blob);
+  // 3) Retrieve the output
+  const out = result.MEMFS.find(f => f.name === 'output.webm');
+  if (!out) {
+    showStatus('No output generated');
+    return;
+  }
 
-  outputVideo.src = url;
+  // 4) Make a Blob & display
+  const blob = new Blob([out.data], { type: 'video/webm' });
+  const url  = URL.createObjectURL(blob);
+
+  preview.src = url;
+  preview.classList.remove('hidden');
+
   downloadLink.href = url;
   downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
-  outputSection.classList.remove('hidden');
-  updateProgress(1, 'Done!');
+  downloadLink.textContent = 'Download WebM';
+  downloadLink.classList.remove('hidden');
+
+  showStatus('Done!');
 });
+
+resetUI();

@@ -1,45 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>MP4 to WebM Converter</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta charset="UTF-8">
+  <title>MP4 → WebM Converter (ffmpeg.js)</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="container">
     <h1>MP4 to WebM Converter</h1>
 
-    <!-- Drag-and-drop zone -->
-    <div id="dropZone">Drag &amp; drop an MP4 video here, or click to select a file</div>
-    <input type="file" id="fileInput" accept="video/mp4" hidden />
-
-    <!-- Quality slider -->
-    <div class="quality-controls">
-      <label for="qualitySlider">Quality:</label>
-      <input type="range" id="qualitySlider" min="50" max="150" value="100" />
-      <span id="qualityLabel">100%</span>
-    </div>
+    <!-- Drop-zone / File picker -->
+    <div id="dropZone">Drag &amp; drop an MP4 here, or click to select</div>
+    <input type="file" id="fileInput" accept="video/mp4" hidden>
 
     <!-- Convert button -->
     <button id="convertBtn" disabled>Convert to WebM</button>
 
-    <!-- Progress bar + status -->
-    <div id="progressContainer" class="hidden">
-      <progress id="progressBar" value="0" max="100"></progress>
-      <span id="progressText">0%</span>
-    </div>
-
-    <!-- Output preview + download -->
-    <div id="output" class="hidden">
-      <h2>Output:</h2>
-      <video id="outputVideo" controls playsinline></video><br />
-      <a id="downloadLink" href="#" download="output.webm">Download WebM</a>
-    </div>
+    <!-- Status / Download -->
+    <div id="status" class="hidden"></div>
+    <video id="preview" controls class="hidden" style="max-width:100%; margin-top:1em;"></video>
+    <a id="downloadLink" class="hidden" download>Download WebM</a>
   </div>
 
-  <!-- 1) FFmpeg.wasm UMD (defines global `FFmpeg`) -->
-  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/ffmpeg.min.js"></script>
+  <!-- 1) ffmpeg.js WebM build (synchronous, single-thread) -->
+  <script src="https://cdn.jsdelivr.net/npm/ffmpeg.js@4.2.9006/ffmpeg-webm.js"></script>
   <!-- 2) Your converter logic -->
-  <script src="converter-ffmpeg.js"></script>
+  <script src="converter-ffmpegjs.js"></script>
 </body>
 </html>
