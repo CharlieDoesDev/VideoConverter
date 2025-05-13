@@ -1,14 +1,14 @@
 // converter.js
-// ────────────
 
-// 1) ESM imports from Skypack (CORS-friendly, browser-ready)  
-import { FFmpeg } from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.15';  
-import { fetchFile } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.15';  
+import { FFmpeg }             from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.6';
+import { fetchFile, toBlobURL } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.6';
 
-// 2) Instantiate the new FFmpeg class (v0.12+ API)
-const ffmpeg = new FFmpeg({ log: true });  // enable stderr logging :contentReference[oaicite:0]{index=0}
+const ffmpeg = new FFmpeg({ log: true });
 
-// UI references
+let loaded = false;
+let selectedFile = null;
+
+// UI refs
 const dropZone         = document.getElementById('dropZone');
 const selectBtn        = document.getElementById('selectBtn');
 const fileInput        = document.getElementById('fileInput');
@@ -22,9 +22,7 @@ const statusDiv        = document.getElementById('status');
 const preview          = document.getElementById('preview');
 const downloadLink     = document.getElementById('downloadLink');
 
-let selectedFile = null;
-
-// Helpers to show/hide & update status
+// Helpers
 const show = el => el.classList.remove('hidden');
 const hide = el => el.classList.add('hidden');
 const setStatus = txt => {
@@ -41,14 +39,20 @@ function resetUI() {
   progressText.textContent = '0%';
 }
 
-// File picker & drag-drop wiring
+// File selection: browse
 selectBtn.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', () => fileInput.files[0] && handleFile(fileInput.files[0]));
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFile(fileInput.files[0]);
+});
+
+// File selection: drag & drop
 ['dragover','dragleave','drop'].forEach(evt => {
   dropZone.addEventListener(evt, e => {
     e.preventDefault();
     dropZone.classList.toggle('hover', evt === 'dragover');
-    if (evt === 'drop' && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    if (evt === 'drop' && e.dataTransfer.files[0]) {
+      handleFile(e.dataTransfer.files[0]);
+    }
   });
 });
 
@@ -62,49 +66,54 @@ function handleFile(file) {
   resetUI();
 }
 
-// Update the quality display
+// Quality slider display
 qualitySlider.addEventListener('input', () => {
   qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
 });
 
-// Main convert handler
+// Load ffmpeg-core dynamically
+async function loadFFmpegCore() {
+  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+
+  await ffmpeg.load({
+    coreURL:   await toBlobURL(`${base}/ffmpeg-core.js`,        'text/javascript'),
+    wasmURL:   await toBlobURL(`${base}/ffmpeg-core.wasm`,      'application/wasm'),
+    workerURL: await toBlobURL(`${base}/ffmpeg-core.worker.js`, 'text/javascript'),
+  });
+
+  loaded = true;
+}
+
+// Main convert logic
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
 
   resetUI();
-  setStatus('Loading FFmpeg core…');
-
-  // 3) Load the WASM core if needed, pointing at jsDelivr’s CORS-enabled assets :contentReference[oaicite:1]{index=1}
-  if (!ffmpeg.isLoaded()) {
-    await ffmpeg.load({
-      coreURL:   'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.15/dist/ffmpeg-core.js',
-      wasmURL:   'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.15/dist/ffmpeg-core.wasm',
-      workerURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.15/dist/ffmpeg-core-worker.js',
-    });
+  if (!loaded) {
+    setStatus('Loading FFmpeg core…');
+    await loadFFmpegCore();
   }
 
-  // 4) Write the dropped file into MEMFS
   setStatus('Reading input file…');
   const data = await fetchFile(selectedFile);
-  await ffmpeg.writeFile('input.mp4', data);  // replaces FS('writeFile') :contentReference[oaicite:2]{index=2}
+  await ffmpeg.writeFile('input.mp4', data);
 
-  // 5) Track real-time progress via the new event API
   ffmpeg.on('progress', ({ ratio }) => {
     show(progressContainer);
     progressBar.value = ratio;
     const pct = Math.round(ratio * 100);
     progressText.textContent = `${pct}%`;
-    setStatus(`Converting… ${pct}%`);        // replaces setProgress :contentReference[oaicite:3]{index=3}
+    setStatus(`Converting… ${pct}%`);
   });
 
-  // 6) Run the FFmpeg command with exec(...) instead of run(...) :contentReference[oaicite:4]{index=4}
   const qp      = Math.max(0.1, parseFloat(qualitySlider.value));
   const bitrate = `${Math.round(qp * 1000)}k`;
+
   try {
     await ffmpeg.exec([
       '-y',
       '-i', 'input.mp4',
-      '-c:v', 'libvpx', '-b:v', bitrate,
+      '-c:v', 'libvpx-vp9', '-b:v', bitrate,
       '-c:a', 'libopus',
       'output.webm'
     ]);
@@ -112,11 +121,8 @@ convertBtn.addEventListener('click', async () => {
     return setStatus('Conversion failed: ' + err.message);
   }
 
-  // 7) Read the output file back out of MEMFS
   setStatus('Finalizing…');
-  const out = await ffmpeg.readFile('output.webm');  // replaces FS('readFile') :contentReference[oaicite:5]{index=5}
-
-  // 8) Create a Blob URL, show preview + download link
+  const out = await ffmpeg.readFile('output.webm');
   const blob = new Blob([out.buffer], { type: 'video/webm' });
   const url  = URL.createObjectURL(blob);
 
@@ -130,4 +136,5 @@ convertBtn.addEventListener('click', async () => {
   setStatus('Done!');
 });
 
+// initial state
 resetUI();
