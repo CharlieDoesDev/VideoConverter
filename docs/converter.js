@@ -2,7 +2,7 @@
 // ────────────
 
 // 0️⃣  Pull in the pure-ESM WebMWriter build
-import WebMWriter from 'https://cdn.jsdelivr.net/npm/@framekit/webm-writer-esm@1.0.0/dist/webm-writer.esm.js';
+import WebMWriter from 'https://cdn.skypack.dev/webm-writer';
 
 // UI refs
 const dropZone      = document.getElementById('dropZone');
