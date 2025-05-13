@@ -1,10 +1,8 @@
 // converter.js
 // ────────────
 
-// 0️⃣  Pull in WebMWriter as an ES module
-import WebMWriter from 'https://cdn.skypack.dev/webm-writer@0.3.1';
-
-// 1️⃣  No more load-order check needed
+// 0️⃣  Pull in the ESM build of webm-writer v3.1
+import WebMWriter from 'https://unpkg.com/webm-writer@3.1.0/dist/webm-writer.esm.js';
 
 // UI refs
 const dropZone      = document.getElementById('dropZone');
@@ -69,32 +67,33 @@ convertBtn.addEventListener('click', async () => {
 
   showStatus('Preparing video…');
 
-  // 1) Load video element
+  // 1) Load the MP4 into a hidden video element
   const video = document.createElement('video');
   video.src = URL.createObjectURL(selectedFile);
   video.muted = true;
   video.playsInline = true;
   await video.play().catch(() => {
-    new Promise(r => video.addEventListener('loadeddata', r, { once: true }));
+    video.currentTime = 0;
+    return new Promise(r => video.addEventListener('loadeddata', r, { once: true }));
   });
 
   const fps = video.frameRate || 30;
   const duration = video.duration;
   const totalFrames = Math.ceil(fps * duration);
 
-  // 2) Setup WebMWriter
+  // 2) Setup WebMWriter (uses WebCodecs under the hood)
   const quality = Math.max(0.1, parseFloat(qualitySlider.value));
-  const writer = new WebMWriter({
-    quality,
-    fileWriter: null,
-    codec: 'vp8',
+  const writer  = new WebMWriter({
+    quality,                // scalar 0.1–1.0
+    fileWriter: null,       // in-memory
+    codec: 'vp8',           // or 'vp9'
     frameRate: fps,
     disableWebAssembly: true
   });
 
-  // 3) Encode frames
+  // 3) Draw & encode each frame
   const canvas = document.createElement('canvas');
-  canvas.width = video.videoWidth;
+  canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
   const ctx = canvas.getContext('2d');
 
@@ -106,7 +105,7 @@ convertBtn.addEventListener('click', async () => {
       finish();
       return;
     }
-    ctx.drawImage(video, 0, 0);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     writer.addFrame(canvas);
     frameCount++;
     showStatus(`Encoding ${frameCount} / ${totalFrames}`);
@@ -131,5 +130,5 @@ convertBtn.addEventListener('click', async () => {
   }
 });
 
-// Initial state
+// Initial UI state
 resetUI();
