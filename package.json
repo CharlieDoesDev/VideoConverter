@@ -6,7 +6,9 @@
     "build": "rollup -c"
   },
   "dependencies": {
-    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/core": "^0.12.1",
+    "@ffmpeg/core-mt": "^0.12.6",
+    "@ffmpeg/ffmpeg": "^0.12.1",
     "mp4box": "^0.5.4",
     "webm-muxer": "^5.1.2"
   },

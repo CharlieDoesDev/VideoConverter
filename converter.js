@@ -1,34 +1,36 @@
 // converter.js
+// ────────────
 
-import { FFmpeg }             from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.1';
-import { fetchFile, toBlobURL } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.1';
+// 1️⃣  Imports from Skypack (ESM + CORS-friendly)
+import { FFmpeg }              from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.6';
+import { fetchFile, toBlobURL } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.6';
 
+// 2️⃣  Instantiate the class-based API (v0.12+)
 const ffmpeg = new FFmpeg({ log: true });
 
-let loaded = false;
 let selectedFile = null;
+let isLoaded     = false;
 
 // UI refs
-const dropZone         = document.getElementById('dropZone');
-const selectBtn        = document.getElementById('selectBtn');
-const fileInput        = document.getElementById('fileInput');
-const qualitySlider    = document.getElementById('qualitySlider');
-const qualityValue     = document.getElementById('qualityValue');
-const convertBtn       = document.getElementById('convertBtn');
-const progressContainer= document.getElementById('progressContainer');
-const progressBar      = document.getElementById('progressBar');
-const progressText     = document.getElementById('progressText');
-const statusDiv        = document.getElementById('status');
-const preview          = document.getElementById('preview');
-const downloadLink     = document.getElementById('downloadLink');
+const dropZone          = document.getElementById('dropZone');
+const selectBtn         = document.getElementById('selectBtn');
+const fileInput         = document.getElementById('fileInput');
+const qualitySlider     = document.getElementById('qualitySlider');
+const qualityValue      = document.getElementById('qualityValue');
+const convertBtn        = document.getElementById('convertBtn');
+const progressContainer = document.getElementById('progressContainer');
+const progressBar       = document.getElementById('progressBar');
+const progressText      = document.getElementById('progressText');
+const statusDiv         = document.getElementById('status');
+const preview           = document.getElementById('preview');
+const downloadLink      = document.getElementById('downloadLink');
 
-// Helpers
+// Simple show/hide helpers
 const show = el => el.classList.remove('hidden');
 const hide = el => el.classList.add('hidden');
-const setStatus = txt => {
-  statusDiv.textContent = txt;
-  show(statusDiv);
-};
+const setStatus = txt => { statusDiv.textContent = txt; show(statusDiv); };
+
+// Reset UI to initial state
 function resetUI() {
   convertBtn.disabled = !selectedFile;
   hide(statusDiv);
@@ -66,40 +68,42 @@ function handleFile(file) {
   resetUI();
 }
 
-// Quality slider display
+// Quality slider update
 qualitySlider.addEventListener('input', () => {
   qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
 });
 
-async function loadFFmpegCore() {
-  // Pin to the same version for all three assets
-  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.1/dist';
-
-  await ffmpeg.load({
-    // Wrap the JS files in Blob URLs to avoid CORS/preflight issues
-    coreURL:   await toBlobURL(`${base}/ffmpeg-core.js`,        'application/javascript'),
-    workerURL: await toBlobURL(`${base}/ffmpeg-core.worker.js`, 'application/javascript'),
-    // The WASM file itself can be fetched directly (jsDelivr sends CORS headers)
-    wasmURL:   `${base}/ffmpeg-core.wasm`,
-  });
-
-  loaded = true;
-}
-
-// Main convert logic
+// Conversion
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
 
   resetUI();
-  if (!loaded) {
+
+  // 3️⃣  Lazy-load the core-mt assets once
+  if (!isLoaded) {
     setStatus('Loading FFmpeg core…');
-    await loadFFmpegCore();
+
+    const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@0.12.6/dist/umd';
+
+    // Blob-wrap each asset to avoid CORS
+    const [coreURL, wasmURL, workerURL] = await Promise.all([
+      toBlobURL(`${baseURL}/ffmpeg-core.js`,        'application/javascript'),
+      toBlobURL(`${baseURL}/ffmpeg-core.wasm`,      'application/wasm'),
+      toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'application/javascript'),
+    ]);
+
+    // classWorkerURL needed for some builds
+    await ffmpeg.load({ coreURL, wasmURL, workerURL, classWorkerURL: workerURL });
+
+    isLoaded = true;
   }
 
+  // 4️⃣  Write the input file into WASM FS
   setStatus('Reading input file…');
   const data = await fetchFile(selectedFile);
   await ffmpeg.writeFile('input.mp4', data);
 
+  // 5️⃣  Hook up progress events
   ffmpeg.on('progress', ({ ratio }) => {
     show(progressContainer);
     progressBar.value = ratio;
@@ -108,6 +112,7 @@ convertBtn.addEventListener('click', async () => {
     setStatus(`Converting… ${pct}%`);
   });
 
+  // 6️⃣  Execute the CLI: MP4→WebM (VP9 + Opus)
   const qp      = Math.max(0.1, parseFloat(qualitySlider.value));
   const bitrate = `${Math.round(qp * 1000)}k`;
 
@@ -123,14 +128,14 @@ convertBtn.addEventListener('click', async () => {
     return setStatus('Conversion failed: ' + err.message);
   }
 
+  // 7️⃣  Pull the result back out
   setStatus('Finalizing…');
   const out = await ffmpeg.readFile('output.webm');
   const blob = new Blob([out.buffer], { type: 'video/webm' });
   const url  = URL.createObjectURL(blob);
 
-  preview.src = url;
-  show(preview);
-
+  // 8️⃣  Show preview and download link
+  preview.src = url; show(preview);
   downloadLink.href     = url;
   downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
   show(downloadLink);
@@ -138,5 +143,5 @@ convertBtn.addEventListener('click', async () => {
   setStatus('Done!');
 });
 
-// initial state
+// Initial UI state
 resetUI();
