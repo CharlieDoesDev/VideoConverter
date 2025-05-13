@@ -2,28 +2,24 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MP4 to WebM Converter</title>
-  <!-- Include CSS for styling -->
-  <link rel="stylesheet" href="style.css" />
-  <!-- UMD scripts for mp4box.js and webm-muxer -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MP4 → WebM Converter</title>
+  <link rel="stylesheet" href="style.css"/>
+  <!-- MP4Box.js for demuxing -->
   <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
+  <!-- webm-muxer UMD (creates global WebMMuxer) -->
   <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2/build/webm-muxer.js"></script>
-  <!-- Converter logic -->
+  <!-- Our converter logic -->
   <script defer src="converter.js"></script>
 </head>
 <body>
   <div class="container">
-    <!-- Drag-and-drop area -->
-    <div id="dropzone">📁 **Drag & drop an MP4 video here, or click to select**</div>
-    <!-- Hidden file input for click-to-select -->
-    <input type="file" id="fileInput" accept="video/mp4" hidden />
-    <!-- Progress bar and status message area -->
+    <div id="dropzone">📁 Drag & drop an MP4 here, or click to select</div>
+    <input type="file" id="fileInput" accept="video/mp4" hidden/>
     <div id="progress-container" class="hidden">
       <div id="progress-bar"></div>
       <div id="status-text"></div>
     </div>
-    <!-- Output download link will appear here -->
     <div id="output"></div>
   </div>
 </body>
