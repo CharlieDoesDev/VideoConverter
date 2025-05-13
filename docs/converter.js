@@ -1,13 +1,11 @@
 // converter.js
 // ────────────
 
-// 0️⃣  Load WebMWriter via require (must be bundled with a CommonJS shim)
-
 // UI refs
 const dropZone      = document.getElementById('dropZone');
 const selectBtn     = document.getElementById('selectBtn');
 const fileInput     = document.getElementById('fileInput');
-const qualitySlider = document.getElementById('qualitySlider');
+const qualitySlider = document.getElementById('qualitySlider'); // now used as scale (0.1–1)
 const qualityValue  = document.getElementById('qualityValue');
 const convertBtn    = document.getElementById('convertBtn');
 const statusDiv     = document.getElementById('status');
@@ -54,16 +52,17 @@ function handleFile(file) {
 }
 
 qualitySlider.addEventListener('input', () => {
-  qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
+  // interpret slider 0.1–1.0 as scale factor
+  const scale = Math.max(0.1, parseFloat(qualitySlider.value));
+  qualityValue.textContent = (scale * 100).toFixed(0) + '%';
 });
 
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
   resetUI();
-
   showStatus('Preparing video…');
 
-  // 1) Load the MP4 into a hidden video element
+  // 1) Load video element
   const video = document.createElement('video');
   video.src = URL.createObjectURL(selectedFile);
   video.muted = true;
@@ -73,68 +72,71 @@ convertBtn.addEventListener('click', async () => {
     return new Promise(r => video.addEventListener('loadeddata', r, { once: true }));
   });
 
-  const fps = video.frameRate || 30;
+  // 2) Compute scale
+  const scale = Math.max(0.1, parseFloat(qualitySlider.value));
+  const w = Math.floor(video.videoWidth * scale / 2) * 2; // even dims
+  const h = Math.floor(video.videoHeight * scale / 2) * 2;
 
-  // 2) Instantiate WebMWriter
-  const quality = Math.max(0.1, parseFloat(qualitySlider.value));
-  const WebMWriter = require('webm-writer');
-
-  const writer  = new WebMWriter({
-    quality,
-    fileWriter: null,
-    codec: 'vp9',
-    frameRate: fps,
-    disableWebAssembly: true
-  });
-
-  // 3) Set up canvas for capturing frames
+  // 3) Canvas for down-scaling
   const canvas = document.createElement('canvas');
-  canvas.width  = video.videoWidth;
-  canvas.height = video.videoHeight;
+  canvas.width  = w;
+  canvas.height = h;
   const ctx = canvas.getContext('2d');
 
-  let frameCount = 0;
-  showStatus(`Encoding…`);
+  // 4) Capture stream & setup MediaRecorder
+  const fps = 30; // assume 30fps if .frameRate unavailable
+  const stream = canvas.captureStream(fps);
 
-  // 4) Frame loop: stop only when the video ends
-  const renderFrame = () => {
-    if (video.ended) {
-      finish();
-      return;
-    }
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    writer.addFrame(canvas);
-    frameCount++;
-    showStatus(`Encoded ${frameCount} frames…`);
-
-    if ('requestVideoFrameCallback' in video) {
-      video.requestVideoFrameCallback(renderFrame);
-    } else {
-      setTimeout(renderFrame, 1000 / fps);
-    }
-  };
-
-  // Kick off encoding once the video is ready
-  if (video.readyState >= 2) {
-    renderFrame();
-  } else {
-    video.addEventListener('loadeddata', renderFrame, { once: true });
+  let mime = 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"';
+  if (!MediaRecorder.isTypeSupported(mime)) {
+    mime = 'video/webm; codecs=vp8,opus';
   }
 
-  // 5) Finalize and output
-  async function finish() {
-    showStatus('Finalizing WebM…');
-    const webmBlob = await writer.complete();
-    const url = URL.createObjectURL(webmBlob);
+  const recorder = new MediaRecorder(stream, {
+    mimeType: mime,
+    videoBitsPerSecond: 2_000_000, // ~2 Mbps target
+    audioBitsPerSecond: 128_000
+  });
+
+  const chunks = [];
+  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    showStatus('Finalizing…');
+    const blob = new Blob(chunks, { type: mime });
+    const url  = URL.createObjectURL(blob);
 
     preview.src = url;
     preview.classList.remove('hidden');
 
-    downloadLink.href     = url;
-    downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
+    downloadLink.href        = url;
+    downloadLink.download    = selectedFile.name.replace(/\.mp4$/i, '') + '.mp4';
     downloadLink.classList.remove('hidden');
 
     showStatus('Done!');
+  };
+
+  // 5) Draw loop
+  showStatus('Recording…');
+  recorder.start();
+
+  const drawFrame = () => {
+    if (video.ended || recorder.state !== 'recording') {
+      recorder.stop();
+      return;
+    }
+    ctx.drawImage(video, 0, 0, w, h);
+    if ('requestVideoFrameCallback' in video) {
+      video.requestVideoFrameCallback(() => drawFrame());
+    } else {
+      setTimeout(drawFrame, 1000 / fps);
+    }
+  };
+
+  // kick off drawing once ready
+  if (video.readyState >= 2) {
+    drawFrame();
+  } else {
+    video.addEventListener('loadeddata', drawFrame, { once: true });
   }
 });
 
