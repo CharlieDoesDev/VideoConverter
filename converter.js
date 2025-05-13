@@ -1,6 +1,6 @@
 // converter.js
 
-import { FFmpeg }             from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.6';
+import { FFmpeg }             from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.1';
 import { fetchFile, toBlobURL } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.1';
 
 const ffmpeg = new FFmpeg({ log: true });
@@ -73,7 +73,7 @@ qualitySlider.addEventListener('input', () => {
 
 // Load ffmpeg-core dynamically
 async function loadFFmpegCore() {
-  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.1/dist/umd';
 
   await ffmpeg.load({
     coreURL:   await toBlobURL(`${base}/ffmpeg-core.js`,        'text/javascript'),
