@@ -33,7 +33,7 @@
   }
   resetUI();
 
-  // Drag & drop & click
+  // Wire up drag & drop + click
   ;['dragover','dragleave','drop'].forEach(evt => {
     dropzone.addEventListener(evt, e => {
       e.preventDefault();
@@ -70,7 +70,6 @@
       }
 
       if (track.codec.startsWith('avc1')) {
-        // Out-of-band avcC if present
         if (track.avcC) {
           const prefix = new Uint8Array([0,0,0,1]);
           const parts = [];
@@ -78,21 +77,17 @@
           track.avcC.pictureParameterSets   .forEach(pps => parts.push(prefix, new Uint8Array(pps)));
           decCfg.description = concat(parts).buffer;
         } else {
-          // Fallback: extract from first sample
           const desc = extractSpsPps(samples[0].data);
           if (!desc) throw new Error('Unable to extract H.264 SPS/PPS');
           decCfg.description = desc;
         }
       }
-      // H.265
       if (track.codec.startsWith('hvc1') && track.hvcC?.buffer) {
         decCfg.description = track.hvcC.buffer;
       }
-      // VP9
       if (track.codec.startsWith('vp09') && track.vpcC?.buffer) {
         decCfg.description = track.vpcC.buffer;
       }
-      // AV1
       if (track.codec.startsWith('av01') && track.av1C?.buffer) {
         decCfg.description = track.av1C.buffer;
       }
@@ -164,14 +159,13 @@
     }
   }
 
-  // --- helpers ---
-
   // Demux MP4 → track & samples
   async function demuxMp4(file) {
     const buf = await file.arrayBuffer();
     buf.fileStart = 0;
     const mp4 = createMP4BoxFile();
     let trackInfo, samples = [];
+
     return new Promise((res, rej) => {
       mp4.onError = e => rej(e);
       mp4.onReady = info => {
@@ -194,32 +188,46 @@
     });
   }
 
-  // Extract SPS+PPS from first H.264 sample buffer
-  function extractSpsPps(buffer) {
-    const dv = new DataView(buffer), parts = [];
-    let off = 0;
+  // Extract SPS+PPS from first H.264 sample
+  function extractSpsPps(input) {
+    // Normalize to a Uint8Array view
+    let view;
+    if (input instanceof ArrayBuffer) {
+      view = new Uint8Array(input);
+    } else if (ArrayBuffer.isView(input)) {
+      view = new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+    } else {
+      return null;
+    }
+
+    const dv = new DataView(view.buffer, view.byteOffset, view.byteLength);
+    const parts = [];
     const prefix = new Uint8Array([0,0,0,1]);
-    // collect two NALs
-    while (parts.length < 2 && off + 4 <= dv.byteLength) {
-      const size = dv.getUint32(off); off += 4;
-      if (off + size > dv.byteLength) break;
-      const nal = new Uint8Array(buffer, off, size);
-      const t = nal[0] & 0x1f;
-      if (t === 7 || t === 8) parts.push(prefix, nal);
-      off += size;
+    let pos = 0;
+
+    // Capture SPS (type 7) and PPS (type 8)
+    while (parts.length < 2 && pos + 4 <= dv.byteLength) {
+      const size = dv.getUint32(pos); pos += 4;
+      if (pos + size > dv.byteLength) break;
+      const nal = new Uint8Array(view.buffer, view.byteOffset + pos, size);
+      const type = nal[0] & 0x1f;
+      if (type === 7 || type === 8) {
+        parts.push(prefix, nal);
+      }
+      pos += size;
     }
     if (parts.length < 2) return null;
     return concat(parts).buffer;
   }
 
-  // Concatenate many Uint8Arrays
+  // Concatenate Uint8Arrays
   function concat(arrays) {
-    let len = arrays.reduce((sum,a)=>sum+a.length,0);
-    const out = new Uint8Array(len);
-    let pos = 0;
+    let total = arrays.reduce((sum,a) => sum + a.length, 0);
+    const out  = new Uint8Array(total);
+    let offset = 0;
     for (const a of arrays) {
-      out.set(a, pos);
-      pos += a.length;
+      out.set(a, offset);
+      offset += a.length;
     }
     return out;
   }
