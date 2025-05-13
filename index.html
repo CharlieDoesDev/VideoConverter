@@ -1,28 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>MP4 → WebM Converter</title>
-  <link rel="stylesheet" href="css/style.css"/>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MP4 to WebM Converter</title>
+  <!-- Include CSS for styling -->
+  <link rel="stylesheet" href="style.css" />
+  <!-- UMD scripts for mp4box.js and webm-muxer -->
+  <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2/build/webm-muxer.js"></script>
+  <!-- Converter logic -->
+  <script defer src="converter.js"></script>
 </head>
 <body>
   <div class="container">
-    <h2>MP4 → WebM</h2>
-    <div id="drop-zone">Drop MP4 here or click to select</div>
-    <input type="file" id="file-input" accept="video/mp4" hidden/>
-    <div id="progress-container" hidden>
-      <div id="progress-bar" aria-valuenow="0"></div>
-      <div id="status-message"></div>
+    <!-- Drag-and-drop area -->
+    <div id="dropzone">📁 **Drag & drop an MP4 video here, or click to select**</div>
+    <!-- Hidden file input for click-to-select -->
+    <input type="file" id="fileInput" accept="video/mp4" hidden />
+    <!-- Progress bar and status message area -->
+    <div id="progress-container" class="hidden">
+      <div id="progress-bar"></div>
+      <div id="status-text"></div>
     </div>
+    <!-- Output download link will appear here -->
+    <div id="output"></div>
   </div>
-
-  <!-- UMD build of webm-muxer, adds global `WebMMuxer` -->
-  <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2/build/webm-muxer.js"></script>
-  <!-- MP4Box (UMD, adds global `MP4Box`) -->
-  <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
-  <!-- Your ES module -->
-  <script type="module" src="js/converter.js"></script>
-
 </body>
 </html>

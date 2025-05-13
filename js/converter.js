@@ -1,166 +1,266 @@
-// js/converter.js
+(async function() {
+  // UI element references
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const progressContainer = document.getElementById('progress-container');
+  const progressBar = document.getElementById('progress-bar');
+  const statusText = document.getElementById('status-text');
+  const outputDiv = document.getElementById('output');
 
-// UMD globals from your HTML:
-// <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2/build/webm-muxer.js"></script>
-// <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
-const { Muxer, ArrayBufferTarget } = WebMMuxer;
-const { createFile: createMP4BoxFile } = MP4Box;
-
-// Elements
-const dropZone          = document.getElementById('drop-zone');
-const fileInput         = document.getElementById('file-input');
-const progressContainer = document.getElementById('progress-container');
-const progressBar       = document.getElementById('progress-bar');
-const statusMessage     = document.getElementById('status-message');
-
-// Wire up UI
-dropZone.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', e => e.target.files[0] && handleFile(e.target.files[0]));
-dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropZone.classList.remove('dragover');
-  e.dataTransfer.files[0] && handleFile(e.dataTransfer.files[0]);
-});
-
-async function handleFile(file) {
-  if (!file.name.toLowerCase().endsWith('.mp4')) {
-    alert('Please select an MP4 file.');
+  // Feature detection: ensure WebCodecs is available
+  const supportsWebCodecs = ('VideoEncoder' in window) && ('VideoDecoder' in window);
+  if (!supportsWebCodecs) {
+    dropzone.textContent = '❌ Your browser does not support the WebCodecs API required for conversion.';
+    dropzone.style.cursor = 'not-allowed';
     return;
   }
-  dropZone.hidden = true;
-  progressContainer.hidden = false;
-  updateStatus('Demuxing MP4…');
-  try {
-    const { track, samples } = await demuxMp4(file);
-    updateStatus('Transcoding frames…');
-    await transcode(track, samples, file.name);
-    updateStatus('Conversion complete!');
-  } catch (err) {
-    console.error(err);
-    updateStatus(`Error: ${err.message}`);
-    setTimeout(resetUI, 3000);
-  }
-}
 
-async function demuxMp4(file) {
-  const buffer = await file.arrayBuffer();
-  buffer.fileStart = 0;
-  const mp4boxFile = createMP4BoxFile();
-  let trackInfo, samples = [];
-  return new Promise((resolve, reject) => {
-    mp4boxFile.onError = e => reject(new Error(e));
-    mp4boxFile.onReady = info => {
-      trackInfo = info.tracks.find(t => t.type === 'video' && t.codec?.startsWith('avc'));
-      if (!trackInfo) return reject(new Error('No H.264 track found'));
-      mp4boxFile.setExtractionOptions(trackInfo.id, null, { nbSamples: trackInfo.nb_samples });
-      mp4boxFile.start();
-    };
-    mp4boxFile.onSamples = (_id, _user, arr) => {
-      samples.push(...arr);
-      updateProgress(Math.min(20, samples.length / trackInfo.nb_samples * 20));
-    };
-    try { mp4boxFile.appendBuffer(buffer); mp4boxFile.flush(); }
-    catch(e){ reject(e); }
-    (function checkDone() {
-      if (trackInfo && samples.length >= trackInfo.nb_samples) resolve({ track: trackInfo, samples });
-      else setTimeout(checkDone, 50);
-    })();
-  });
-}
-
-async function transcode(track, samples, originalName) {
-  if (!window.VideoDecoder || !window.VideoEncoder) throw new Error('WebCodecs not supported');
-
-  const { codec, video:{width, height}, avcDecoderConfigRecord, nb_samples } = track;
-
-  // build description: try avcDecoderConfigRecord, else manual extract
-  let description = avcDecoderConfigRecord?.buffer;
-  if (!description) {
-    description = extractSpsPps(samples);
-    if (!description) throw new Error('Could not extract SPS/PPS for decoder');
+  // Utility: Update progress bar and text
+  function updateProgress(percent, message) {
+    progressBar.style.width = percent + '%';
+    statusText.textContent = message || '';
   }
 
-  // muxer setup
-  const muxer = new Muxer({ target: new ArrayBufferTarget(), video:{ codec:'V_VP8', width, height, frameRate:30 }});
-  let processed = 0;
-  const encoder = new VideoEncoder({
-    output: (chunk, meta) => {
-      muxer.addVideoChunk(chunk, meta);
-      processed++;
-      updateProgress(20 + (processed/nb_samples)*75);
-    },
-    error: e=>{ throw new Error(`Encode error: ${e.message}`); }
-  });
-  encoder.configure({ codec:'vp8', width, height, bitrate:1_000_000, framerate:30 });
-
-  const decoder = new VideoDecoder({
-    output: frame => { encoder.encode(frame); frame.close(); },
-    error: e => { throw new Error(`Decode error: ${e.message}`); }
-  });
-  decoder.configure({ codec, description });
-
-  for (let s of samples) {
-    const chunk = new EncodedVideoChunk({ type: s.is_rap?'key':'delta', timestamp:s.cts, data:s.data });
-    decoder.decode(chunk);
+  // Utility: Reset UI to initial state for new conversion
+  function resetUI() {
+    progressBar.style.width = '0%';
+    statusText.textContent = '';
+    progressContainer.classList.add('hidden');
+    outputDiv.innerHTML = '';
+    dropzone.classList.remove('disabled');
+    dropzone.innerHTML = '📁 <b>Drag & drop an MP4 video here, or click to select</b>';
   }
-  await decoder.flush();
-  await encoder.flush();
 
-  muxer.finalize();
-  const { buffer } = muxer.target;
-  saveBlob(new Blob([buffer],{type:'video/webm'}), originalName.replace(/\.mp4$/i,'.webm'));
-  updateProgress(100);
-}
+  // Initialize UI state
+  resetUI();
 
-// scans first few samples for Annex-B SPS (type=7) and PPS (8)
-function extractSpsPps(samples) {
-  const prefix = new Uint8Array([0,0,0,1]);
-  let sps, pps;
-  outer: for (let i=0;i<Math.min(samples.length,10);i++){
-    const data = new Uint8Array(samples[i].data);
-    for (let j=0;j+4<data.length;j++){
-      if (data[j]===0 && data[j+1]===0 && data[j+2]===0 && data[j+3]===1){
-        const nalType = data[j+4]&0x1F;
-        if (nalType===7 && !sps) {
-          // read until next start code or end
-          const end = findNextStart(data,j+4);
-          sps = data.subarray(j,end);
+  // Drag & drop events
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    dropzone.classList.add('dragover');
+  });
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('dragover');
+  });
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer.files.length > 0) {
+      handleFile(e.dataTransfer.files[0]);
+    }
+  });
+  // Click on dropzone opens file dialog
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) {
+      handleFile(fileInput.files[0]);
+    }
+  });
+
+  // Main file handling and conversion function
+  async function handleFile(file) {
+    // Only accept MP4 files
+    if (!file.name.toLowerCase().endsWith('.mp4') && file.type !== 'video/mp4') {
+      alert('Please select an MP4 video file.');
+      return;
+    }
+
+    // Prepare UI for conversion
+    dropzone.innerHTML = '⌛ Processing...';
+    dropzone.classList.add('disabled');
+    progressContainer.classList.remove('hidden');
+    updateProgress(0, 'Starting conversion...');
+
+    try {
+      // Read file into ArrayBuffer
+      const arrayBuffer = await file.arrayBuffer();
+      // Initialize MP4Box for parsing
+      const mp4boxfile = MP4Box.createFile();
+      let videoTrackId = null;
+      let videoTrackInfo = null;
+      let totalFrames = 0;
+
+      // Set up MP4Box event callbacks
+      mp4boxfile.onError = (e) => { throw new Error('MP4 parsing error: ' + e); };
+      mp4boxfile.onReady = (info) => {
+        // Find first video track
+        const videoTracks = info.tracks.filter(t => t.video);
+        if (videoTracks.length === 0) {
+          throw new Error('No video track found in file.');
         }
-        if (nalType===8 && !pps) {
-          const end = findNextStart(data,j+4);
-          pps = data.subarray(j,end);
+        videoTrackInfo = videoTracks[0];
+        videoTrackId = videoTrackInfo.id;
+        totalFrames = videoTrackInfo.nb_samples || 0;
+        // Set extraction options for the video track (all samples, starting at RAP)
+        mp4boxfile.setExtractionOptions(videoTrackId, null, { nbSamples: totalFrames, rapAlignement: true });
+        mp4boxfile.start();
+      };
+
+      // Create WebCodecs decoder/encoder and muxer (to be configured later when ready)
+      let decoder, encoder, muxer;
+      // Flags to ensure one-time setup
+      let decoderConfigured = false;
+      let framesDecoded = 0;
+
+      // Decoder output callback: encode video frames as they arrive
+      const handleFrame = (frame) => {
+        try {
+          // On receiving a decoded frame, encode it to VP8
+          encoder.encode(frame);  // let encoder decide keyFrame internally
+          frame.close();
+          framesDecoded++;
+          // Update progress based on frames processed
+          if (totalFrames) {
+            const percent = Math.round((framesDecoded / totalFrames) * 100);
+            updateProgress(percent, `Transcoding frame ${framesDecoded} of ${totalFrames}...`);
+          }
+        } catch (err) {
+          console.error('Error during frame encode:', err);
         }
-        if (sps && pps) break outer;
-      }
+      };
+
+      // Encoder output callback: feed encoded chunk to muxer
+      const handleChunk = (chunk, metadata) => {
+        muxer.addVideoChunk(chunk, metadata);
+      };
+
+      // Set up sample extraction callback
+      mp4boxfile.onSamples = async (id, user, samples) => {
+        // Only initialize decoder, encoder, and muxer once (on first batch of samples)
+        if (!decoderConfigured) {
+          decoderConfigured = true;
+          const track = videoTrackInfo;
+          // Prepare VideoDecoder config for the input codec
+          /** Determine codec string and extradata (if needed) **/
+          const codec = track.codec;  // e.g., "avc1.64001e", "vp09.00.10.08", etc.
+          const decoderConfig = { codec };
+          // Set coded width/height if available (for better compatibility)
+          if (track.video && track.video.width && track.video.height) {
+            decoderConfig.codedWidth = track.video.width;
+            decoderConfig.codedHeight = track.video.height;
+          }
+          // If codec is H.264/AVC or similar that needs config bytes:
+          if ((codec.startsWith('avc1') || codec.startsWith('avc3')) && samples[0]?.description) {
+            // Attempt to get AVC config (SPS/PPS) from the sample description
+            const desc = samples[0].description;
+            if (desc.avcC) {
+              // Use the avcC box bytes as description:contentReference[oaicite:4]{index=4}
+              decoderConfig.description = desc.avcC; 
+            } else {
+              // Fallback: extract SPS/PPS from first sample in-stream (if avcC not provided)
+              decoderConfig.description = extractAvcConfig(samples[0].data);
+            }
+          }
+          // If codec is AV1 and has config box
+          if (codec.startsWith('av01') && samples[0]?.description && samples[0].description.av1C) {
+            decoderConfig.description = samples[0].description.av1C;
+          }
+          // If codec is VP9 and has config (vpcC) box
+          if (codec.startsWith('vp09') && samples[0]?.description && samples[0].description.vpcC) {
+            decoderConfig.description = samples[0].description.vpcC;
+          }
+
+          // Check decoder support for this config:contentReference[oaicite:5]{index=5}
+          const supportInfo = await VideoDecoder.isConfigSupported(decoderConfig);
+          if (!supportInfo.supported) {
+            throw new Error(`Decoding codec ${codec} is not supported on this platform.`);
+          }
+
+          // Initialize decoder
+          decoder = new VideoDecoder({
+            output: handleFrame,
+            error: e => console.error('Decoder error:', e)
+          });
+          decoder.configure(decoderConfig);
+
+          // Check encoder support for VP8 output
+          const encConfig = { codec: 'vp8', width: track.video.width, height: track.video.height };
+          const encSupport = await VideoEncoder.isConfigSupported(encConfig);
+          if (!encSupport.supported) {
+            throw new Error('VP8 encoding is not supported in this browser.');
+          }
+
+          // Initialize muxer for WebM output (video track only):contentReference[oaicite:6]{index=6}
+          muxer = new WebMMuxer({
+            target: 'buffer',  // store output in ArrayBuffer internally
+            video: { codec: 'V_VP8', width: track.video.width, height: track.video.height }
+          });
+          // Initialize encoder
+          encoder = new VideoEncoder({
+            output: handleChunk,
+            error: e => console.error('Encoder error:', e)
+          });
+          encoder.configure(encConfig);
+        }
+
+        // Process each video sample: feed to decoder
+        for (const sample of samples) {
+          // Create EncodedVideoChunk from sample
+          const chunk = new EncodedVideoChunk({
+            type: sample.is_rap ? 'key' : 'delta',
+            timestamp: Math.round(sample.cts * (1000000 / videoTrackInfo.timescale)), // microseconds
+            data: new Uint8Array(sample.data)  // copy sample data
+          });
+          decoder.decode(chunk);
+        }
+
+        // Release the memory of processed samples from mp4box
+        const lastSampleNum = samples[samples.length - 1].number;
+        mp4boxfile.releaseUsedSamples(id, lastSampleNum);
+      };
+
+      // Append the entire file buffer to mp4box (parsing happens here)
+      arrayBuffer.fileStart = 0;
+      mp4boxfile.appendBuffer(arrayBuffer);
+      mp4boxfile.flush();  // signal end of file data
+
+      // Wait for all decoding to finish
+      await decoder.flush();
+      // Wait for all encoding to finish
+      await encoder.flush();
+      // Finalize WebM file
+      const webmBuffer = muxer.finalize();
+      const webmBlob = new Blob([webmBuffer], { type: 'video/webm' });
+
+      // Provide download link to user
+      const fileName = file.name.replace(/\.[^/.]+$/, ''); // name without extension
+      const downloadName = fileName + '_converted.webm';
+      const url = URL.createObjectURL(webmBlob);
+      outputDiv.innerHTML = `✅ Conversion complete. <a href="${url}" download="${downloadName}">Download WebM</a>`;
+      updateProgress(100, 'Conversion complete.');
+    } catch (err) {
+      console.error(err);
+      statusText.textContent = 'Error: ' + err.message;
     }
   }
-  if (sps && pps) {
-    // concat prefix+sps + prefix+pps
-    const out = new Uint8Array(prefix.length+sps.length+prefix.length+pps.length);
-    let off=0;
-    out.set(prefix,off); off+=prefix.length;
-    out.set(sps,off);    off+=sps.length;
-    out.set(prefix,off); off+=prefix.length;
-    out.set(pps,off);
-    return out.buffer;
-  }
-  return null;
-}
-function findNextStart(data, pos){
-  for (let i=pos;i+4<data.length;i++){
-    if (data[i]===0&&data[i+1]===0&&data[i+2]===0&&data[i+3]===1) return i;
-  }
-  return data.length;
-}
 
-function updateProgress(p){ progressBar.style.width = Math.min(100,Math.max(0,p))+'%'; }
-function updateStatus(m){ statusMessage.textContent = m; }
-function resetUI(){ progressContainer.hidden=true; dropZone.hidden=false; }
-function saveBlob(blob,name){
-  const url=URL.createObjectURL(blob), a=document.createElement('a');
-  a.href=url; a.download=name; document.body.appendChild(a);
-  a.click(); document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(url),100);
-}
+  // Helper: Extract SPS/PPS NAL units from raw H.264 sample data to build decoder config:contentReference[oaicite:7]{index=7}
+  function extractAvcConfig(sampleData) {
+    // Parse the first sample for SPS/PPS (assuming length-prefixed NALs)
+    const dataView = new DataView(sampleData);
+    let offset = 0;
+    const spsCount = 1; // typically one SPS
+    const ppsCount = 1; // typically one PPS
+    const configArray = [];
+    // Extract SPS
+    if (sampleData.byteLength > 4) {
+      const spsLength = dataView.getUint32(offset); offset += 4;
+      configArray.push(new Uint8Array(sampleData, offset, spsLength));
+      offset += spsLength;
+      // Extract PPS
+      if (sampleData.byteLength >= offset + 4) {
+        const ppsLength = dataView.getUint32(offset); offset += 4;
+        configArray.push(new Uint8Array(sampleData, offset, ppsLength));
+        // No need to offset further for config
+      }
+    }
+    // Concatenate SPS/PPS arrays into one Uint8Array (AVCDecoderConfigRecord format expectation)
+    let totalLen = 0;
+    configArray.forEach(arr => totalLen += arr.length);
+    const combined = new Uint8Array(totalLen);
+    let cur = 0;
+    configArray.forEach(arr => { combined.set(arr, cur); cur += arr.length; });
+    return combined.buffer;
+  }
+})();
