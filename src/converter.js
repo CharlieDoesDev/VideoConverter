@@ -1,53 +1,42 @@
 // converter.js
 // ────────────
 
-// 1️⃣  Imports from Skypack (ESM + CORS-friendly)
-import { FFmpeg }               from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.6';
-import { fetchFile, toBlobURL } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.6';
-
-// 2️⃣  Instantiate the class-based API (v0.12+)
-const ffmpeg = new FFmpeg({ log: true });
-
-let selectedFile = null;
-let isLoaded     = false;
-
-// UI refs
-const dropZone          = document.getElementById('dropZone');
-const selectBtn         = document.getElementById('selectBtn');
-const fileInput         = document.getElementById('fileInput');
-const qualitySlider     = document.getElementById('qualitySlider');
-const qualityValue      = document.getElementById('qualityValue');
-const convertBtn        = document.getElementById('convertBtn');
-const progressContainer = document.getElementById('progressContainer');
-const progressBar       = document.getElementById('progressBar');
-const progressText      = document.getElementById('progressText');
-const statusDiv         = document.getElementById('status');
-const preview           = document.getElementById('preview');
-const downloadLink      = document.getElementById('downloadLink');
-
-// Simple show/hide helpers
-const show      = el => el.classList.remove('hidden');
-const hide      = el => el.classList.add('hidden');
-const setStatus = txt => { statusDiv.textContent = txt; show(statusDiv); };
-
-// Reset UI to initial state
-function resetUI() {
-  convertBtn.disabled = !selectedFile;
-  hide(statusDiv);
-  hide(preview);
-  hide(downloadLink);
-  hide(progressContainer);
-  progressBar.value = 0;
-  progressText.textContent = '0%';
+// Ensure WebMWriter is loaded
+if (typeof WebMWriter === 'undefined') {
+  throw new Error('WebMWriter is not loaded. Make sure you include webm-writer.min.js');
 }
 
-// File selection: browse
+// UI refs
+const dropZone      = document.getElementById('dropZone');
+const selectBtn     = document.getElementById('selectBtn');
+const fileInput     = document.getElementById('fileInput');
+const qualitySlider = document.getElementById('qualitySlider');
+const qualityValue  = document.getElementById('qualityValue');
+const convertBtn    = document.getElementById('convertBtn');
+const statusDiv     = document.getElementById('status');
+const preview       = document.getElementById('preview');
+const downloadLink  = document.getElementById('downloadLink');
+
+let selectedFile = null;
+
+// Helpers
+const showStatus = msg => {
+  statusDiv.textContent = msg;
+  statusDiv.classList.remove('hidden');
+};
+const hideStatus = () => statusDiv.classList.add('hidden');
+const resetUI = () => {
+  convertBtn.disabled = !selectedFile;
+  hideStatus();
+  preview.classList.add('hidden');
+  downloadLink.classList.add('hidden');
+};
+
+// File selection
 selectBtn.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => {
   if (fileInput.files[0]) handleFile(fileInput.files[0]);
 });
-
-// File selection: drag & drop
 ['dragover','dragleave','drop'].forEach(evt => {
   dropZone.addEventListener(evt, e => {
     e.preventDefault();
@@ -68,7 +57,7 @@ function handleFile(file) {
   resetUI();
 }
 
-// Quality slider update
+// Quality slider display
 qualitySlider.addEventListener('input', () => {
   qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
 });
@@ -76,80 +65,78 @@ qualitySlider.addEventListener('input', () => {
 // Conversion
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
-
   resetUI();
 
-  // 3️⃣  Lazy-load the core-mt assets once
-  if (!isLoaded) {
-    setStatus('Loading FFmpeg core…');
+  showStatus('Preparing video…');
 
-    const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-mt@0.12.6/dist/umd';
-
-    // Blob-wrap each asset to avoid CORS
-    const [coreURL, wasmURL, workerURL] = await Promise.all([
-      toBlobURL(`${baseURL}/ffmpeg-core.js`,        'application/javascript'),
-      toBlobURL(`${baseURL}/ffmpeg-core.wasm`,      'application/wasm'),
-      toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'application/javascript'),
-    ]);
-
-    // classWorkerURL needed for some builds
-    await ffmpeg.load({
-      coreURL,
-      wasmURL,
-      workerURL,
-      classWorkerURL: workerURL
-    });
-
-    isLoaded = true;
-  }
-
-  // 4️⃣  Write the input file into WASM FS
-  setStatus('Reading input file…');
-  const data = await fetchFile(selectedFile);
-  await ffmpeg.writeFile('input.mp4', data);
-
-  // 5️⃣  Hook up progress events
-  ffmpeg.on('progress', ({ ratio }) => {
-    show(progressContainer);
-    progressBar.value = ratio;
-    const pct = Math.round(ratio * 100);
-    progressText.textContent = `${pct}%`;
-    setStatus(`Converting… ${pct}%`);
+  // 1) Load the MP4 into a hidden video element
+  const video = document.createElement('video');
+  video.src = URL.createObjectURL(selectedFile);
+  video.muted = true;
+  video.playsInline = true;
+  await video.play().catch(() => {
+    // autoplay might be blocked—seek to start instead
+    video.currentTime = 0;
+    new Promise(r => video.addEventListener('loadeddata', r, { once: true }));
   });
 
-  // 6️⃣  Execute the CLI: MP4→WebM (VP9 + Opus)
-  const qp      = Math.max(0.1, parseFloat(qualitySlider.value));
-  const bitrate = `${Math.round(qp * 1000)}k`;
+  const fps = video.frameRate || 30;        // fallback to 30 if unavailable
+  const duration = video.duration;
+  const totalFrames = Math.ceil(fps * duration);
 
-  try {
-    await ffmpeg.exec([
-      '-y',
-      '-i', 'input.mp4',
-      '-c:v', 'libvpx-vp9',
-      '-b:v', bitrate,
-      '-c:a', 'libopus',
-      'output.webm'
-    ]);
-  } catch (err) {
-    return setStatus('Conversion failed: ' + err.message);
+  // 2) Set up WebMWriter with WebCodecs backend
+  const quality = Math.max(0.1, parseFloat(qualitySlider.value));
+  const writer = new WebMWriter({
+    quality,                // 0.1–1.0
+    fileWriter: null,       // in-memory blob
+    codec: 'vp8',           // or 'vp9'
+    frameRate: fps,
+    webWorkerPath: null,    // we don't need a worker; writer will use WebCodecs
+    disableWebAssembly: true // force WebCodecs path
+  });
+
+  // 3) Draw & encode each frame
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+
+  let frameCount = 0;
+  showStatus(`Encoding 0 / ${totalFrames}`);
+
+  // Use requestVideoFrameCallback if supported
+  const renderFrame = () => {
+    if (video.ended || frameCount >= totalFrames) {
+      finish();
+      return;
+    }
+    // draw current frame
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // add to webm
+    writer.addFrame(canvas);
+    frameCount++;
+    showStatus(`Encoding ${frameCount} / ${totalFrames}`);
+
+    // schedule next
+    video.requestVideoFrameCallback(renderFrame);
+  };
+
+  // Start frame loop
+  renderFrame();
+
+  // 4) Finalize and output
+  async function finish() {
+    showStatus('Finalizing WebM…');
+    const webmBlob = await writer.complete();
+    const url = URL.createObjectURL(webmBlob);
+
+    preview.src = url;
+    preview.classList.remove('hidden');
+
+    downloadLink.href = url;
+    downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
+    downloadLink.classList.remove('hidden');
+
+    showStatus('Done!');
   }
-
-  // 7️⃣  Pull the result back out
-  setStatus('Finalizing…');
-  const out = await ffmpeg.readFile('output.webm');
-  const blob = new Blob([out.buffer], { type: 'video/webm' });
-  const url  = URL.createObjectURL(blob);
-
-  // 8️⃣  Show preview and download link
-  preview.src = url;
-  show(preview);
-
-  downloadLink.href     = url;
-  downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
-  show(downloadLink);
-
-  setStatus('Done!');
 });
-
-// Initial UI state
-resetUI();
