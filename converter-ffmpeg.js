@@ -1,151 +1,146 @@
-// Get references to UI elements
-const dropZone    = document.getElementById('dropZone');
-const fileInput   = document.getElementById('fileInput');
-const qualitySlider = document.getElementById('qualitySlider');
-const qualityLabel  = document.getElementById('qualityLabel');
-const convertBtn  = document.getElementById('convertBtn');
-const progressContainer = document.getElementById('progressContainer');
-const progressBar  = document.getElementById('progressBar');
-const progressText = document.getElementById('progressText');
-const outputSection = document.getElementById('output');
-const outputVideo  = document.getElementById('outputVideo');
-const downloadLink = document.getElementById('downloadLink');
-
-// Initialize FFmpeg.wasm instance with progress callback
 // converter-ffmpeg.js
 
+// 1) Initialize FFmpeg.wasm with single-thread core
 const { createFFmpeg, fetchFile } = FFmpeg;
 const ffmpeg = createFFmpeg({
   log: true,
-  // single-threaded core (no SharedArrayBuffer, CORS-friendly)
-  corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
-  // Use the latest version of FFmpeg core,
-  progress: ({ ratio }) => {
-    // Update progress bar and text
-    const percent = (ratio * 100).toFixed(2);
-    progressBar.value = percent;
-    progressText.textContent = percent + '%';
-  }
+  corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.12.15/dist/ffmpeg-core.js'
 });
-let ffmpegLoaded = false;
+
+// 2) UI element references
+const dropZone        = document.getElementById('dropZone');
+const fileInput       = document.getElementById('fileInput');
+const qualitySlider   = document.getElementById('qualitySlider');
+const qualityLabel    = document.getElementById('qualityLabel');
+const convertBtn      = document.getElementById('convertBtn');
+const progressContainer = document.getElementById('progressContainer');
+const progressBar     = document.getElementById('progressBar');
+const progressText    = document.getElementById('progressText');
+const outputSection   = document.getElementById('output');
+const outputVideo     = document.getElementById('outputVideo');
+const downloadLink    = document.getElementById('downloadLink');
+
 let selectedFile = null;
-let originalDuration = 0;  // in seconds
+let originalDuration = 0;
 
-// Update quality label when slider moves
-qualitySlider.addEventListener('input', () => {
-  qualityLabel.textContent = qualitySlider.value + '%';
-});
-
-// Handle drag-and-drop events on the drop zone
-dropZone.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  dropZone.classList.add('hover');
-});
-dropZone.addEventListener('dragleave', () => {
-  dropZone.classList.remove('hover');
-});
-dropZone.addEventListener('drop', (e) => {
-  e.preventDefault();
-  dropZone.classList.remove('hover');
-  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-    handleFileSelection(e.dataTransfer.files[0]);
-  }
-});
-// Clicking the drop zone triggers file input
-dropZone.addEventListener('click', () => fileInput.click());
-
-// Handle file input selection
-fileInput.addEventListener('change', (e) => {
-  if (e.target.files && e.target.files[0]) {
-    handleFileSelection(e.target.files[0]);
-  }
-});
-
-// When a file is selected (via drop or file dialog)
-async function handleFileSelection(file) {
-  selectedFile = file;
-  // Enable the convert button
-  convertBtn.disabled = false;
-  // Show the selected file name in the drop zone text
-  dropZone.textContent = `Selected file: ${file.name}`;
-  // Load video metadata to get duration (for bitrate calculation)
-  originalDuration = await getVideoDuration(file);
+// 3) UI helper functions
+function resetUI() {
+  progressBar.value = 0;
+  progressText.textContent = '0%';
+  progressContainer.classList.add('hidden');
+  outputSection.classList.add('hidden');
+  convertBtn.disabled = !selectedFile;
+}
+function updateProgress(ratio, msg = '') {
+  const pct = (ratio * 100).toFixed(2);
+  progressBar.value = pct;
+  progressText.textContent = msg || `${pct}%`;
 }
 
-// Utility: get video duration using a temporary video element
+// 4) Quality slider event
+qualitySlider.addEventListener('input', () => {
+  qualityLabel.textContent = `${qualitySlider.value}%`;
+});
+
+// 5) Drag & drop and click handlers
+;['dragover','dragleave','drop'].forEach(evt => {
+  dropZone.addEventListener(evt, e => {
+    e.preventDefault();
+    dropZone.classList.toggle('hover', evt === 'dragover');
+    if (evt === 'drop' && e.dataTransfer.files[0]) {
+      handleFileSelection(e.dataTransfer.files[0]);
+    }
+  });
+});
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleFileSelection(fileInput.files[0]);
+});
+
+// 6) When a file is selected
+async function handleFileSelection(file) {
+  if (!file.name.toLowerCase().endsWith('.mp4')) {
+    alert('Please select an MP4 file.');
+    return;
+  }
+  selectedFile = file;
+  convertBtn.disabled = false;
+  dropZone.textContent = `Selected: ${file.name}`;
+
+  // Load metadata to get duration
+  originalDuration = await getVideoDuration(file);
+  resetUI();
+}
+
+// 7) Utility: get video duration
 function getVideoDuration(file) {
-  return new Promise((resolve) => {
-    const tempVideo = document.createElement('video');
-    tempVideo.preload = 'metadata';
-    tempVideo.src = URL.createObjectURL(file);
-    tempVideo.onloadedmetadata = () => {
-      URL.revokeObjectURL(tempVideo.src);
-      resolve(tempVideo.duration);
+  return new Promise(resolve => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.src = URL.createObjectURL(file);
+    v.onloadedmetadata = () => {
+      URL.revokeObjectURL(v.src);
+      resolve(v.duration);
     };
   });
 }
 
-// Convert button click -> perform conversion
+// 8) Convert button click
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
-  // Ensure FFmpeg core is loaded
-  if (!ffmpegLoaded) {
-    progressText.textContent = 'Loading FFmpeg...';
+
+  // Load FFmpeg core if needed
+  if (!ffmpeg.isLoaded()) {
     progressContainer.classList.remove('hidden');
-    await ffmpeg.load();  // load WASM FFmpeg core
-    ffmpegLoaded = true;
+    progressText.textContent = 'Loading FFmpeg…';
+    await ffmpeg.load();
   }
-  // Show progress UI and reset to 0%
-  progressText.textContent = '0%';
-  progressBar.value = 0;
+
+  // Show progress and reset
   progressContainer.classList.remove('hidden');
-  outputSection.classList.add('hidden');  // hide previous output if any
+  updateProgress(0, 'Starting…');
 
-  // Write input file to FFmpeg FS
+  // Write input into FFmpeg FS
   const data = await fetchFile(selectedFile);
-  await ffmpeg.FS('writeFile', 'input.mp4', data);
+  ffmpeg.FS('writeFile', 'input.mp4', data);
 
-  // Build ffmpeg command with scale filter and bitrates
-  const scaleFactor = parseFloat(qualitySlider.value) / 100.0;
-  const scaleFilter = `scale=iw*${scaleFactor}:ih*${scaleFactor}`;  // e.g. 0.5 for half size:contentReference[oaicite:10]{index=10}
-  // Calculate video bitrate (scale original bitrate by factor)
-  let totalBitrate = (selectedFile.size * 8) / originalDuration;  // bits per second
-  let videoBitrate = totalBitrate * scaleFactor;
-  const audioBitrate = 128000;  // 128k for audio in bits/sec
-  if (videoBitrate < 1_00000) {  // ensure a minimum video bitrate ~100kbps
-    videoBitrate = 1_00000;
-  }
-  // Format video bitrate as 'XXXk'
-  const videoKbps = Math.floor(videoBitrate / 1000);
+  // Build scale filter and bitrate
+  const scaleFactor = qualitySlider.value / 100;
+  const scaleFilter = `scale=iw*${scaleFactor}:ih*${scaleFactor}`;
+  // Approximate total bitrate (in bits/sec)
+  let totalBitsPerSec = (selectedFile.size * 8) / originalDuration;
+  let videoBitsPerSec = totalBitsPerSec * scaleFactor;
+  const audioBitsPerSec = 128_000; // fixed 128 kbps
+  videoBitsPerSec = Math.max(videoBitsPerSec - audioBitsPerSec, 100_000);
+  const videoKbps = Math.floor(videoBitsPerSec / 1000);
 
-  // Run FFmpeg conversion: MP4 -> WebM (VP8/Opus)
-  progressText.textContent = 'Converting...';
+  // Run FFmpeg command
+  progressText.textContent = 'Converting…';
   try {
     await ffmpeg.run(
-      '-y',                             // overwrite output if exists
-      '-i', 'input.mp4',                // input file
-      '-vf', scaleFilter,               // scale video filter with factor
-      '-c:v', 'libvpx',                 // VP8 video codec:contentReference[oaicite:11]{index=11}
-      '-b:v', `${videoKbps}k`,          // scaled video bitrate
-      '-c:a', 'libopus',                // Opus audio codec:contentReference[oaicite:12]{index=12}
-      '-b:a', '128k',                   // audio bitrate 128k
-      'output.webm'                     // output file name
+      '-y',
+      '-i','input.mp4',
+      '-vf', scaleFilter,
+      '-c:v','libvpx',
+      '-b:v', `${videoKbps}k`,
+      '-c:a','libopus',
+      '-b:a','128k',
+      'output.webm'
     );
-  } catch (err) {
-    progressText.textContent = 'Error during conversion';
+  } catch(err) {
     console.error(err);
+    progressText.textContent = 'Conversion error';
     return;
   }
 
-  // Read the output WebM file from FS
-  const outputData = ffmpeg.FS('readFile', 'output.webm');
-  // Create a blob URL for the output video
-  const blob = new Blob([outputData.buffer], { type: 'video/webm' });
-  const blobUrl = URL.createObjectURL(blob);
+  // Read output and display
+  const outData = ffmpeg.FS('readFile', 'output.webm');
+  const blob   = new Blob([outData.buffer], { type: 'video/webm' });
+  const url    = URL.createObjectURL(blob);
 
-  // Show the output video and download link
-  outputVideo.src = blobUrl;
-  downloadLink.href = blobUrl;
+  outputVideo.src = url;
+  downloadLink.href = url;
+  downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
   outputSection.classList.remove('hidden');
-  progressText.textContent = 'Conversion complete!';
+  updateProgress(1, 'Done!');
 });
