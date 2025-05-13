@@ -1,7 +1,7 @@
 // converter.js
 
 import { FFmpeg }             from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.6';
-import { fetchFile, toBlobURL } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.6';
+import { fetchFile, toBlobURL } from 'https://cdn.skypack.dev/@ffmpeg/util@0.12.1';
 
 const ffmpeg = new FFmpeg({ log: true });
 
