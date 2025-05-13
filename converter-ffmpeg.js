@@ -12,10 +12,14 @@ const outputVideo  = document.getElementById('outputVideo');
 const downloadLink = document.getElementById('downloadLink');
 
 // Initialize FFmpeg.wasm instance with progress callback
+// converter-ffmpeg.js
+
 const { createFFmpeg, fetchFile } = FFmpeg;
 const ffmpeg = createFFmpeg({
   log: true,
-  corePath: 'https://unpkg.com/@ffmpeg/core@0.11.8/dist/ffmpeg-core.js',
+  // single-threaded core (no SharedArrayBuffer, CORS-friendly)
+  corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
+  // Use the latest version of FFmpeg core,
   progress: ({ ratio }) => {
     // Update progress bar and text
     const percent = (ratio * 100).toFixed(2);
