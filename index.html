@@ -1,30 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>MP4 → WebM Converter (ffmpeg.js)</title>
-  <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8" />
+  <title>MP4 → WebM Converter</title>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="container">
     <h1>MP4 to WebM Converter</h1>
 
-    <!-- Drop-zone / File picker -->
     <div id="dropZone">Drag &amp; drop an MP4 here, or click to select</div>
-    <input type="file" id="fileInput" accept="video/mp4" hidden>
+    <input type="file" id="fileInput" accept="video/mp4" hidden />
 
-    <!-- Convert button -->
     <button id="convertBtn" disabled>Convert to WebM</button>
 
-    <!-- Status / Download -->
     <div id="status" class="hidden"></div>
-    <video id="preview" controls class="hidden" style="max-width:100%; margin-top:1em;"></video>
+    <video id="preview" controls class="hidden" style="max-width: 100%; margin-top: 1em;"></video>
     <a id="downloadLink" class="hidden" download>Download WebM</a>
   </div>
 
-  <!-- 1) ffmpeg.js WebM build (synchronous, single-thread) -->
-  <script src="https://cdn.jsdelivr.net/npm/ffmpeg.js@4.2.9006/ffmpeg-webm.js"></script>
-  <!-- 2) Your converter logic -->
-  <script src="converter-ffmpeg.js"></script>
+  <!-- 1) Load the ffmpeg.js-UMD build for WebM (14.7 MB) -->
+  <script src="https://cdn.jsdelivr.net/npm/@salomvary/ffmpeg.js-umd@3.1.9001/ffmpeg-webm.js"></script>
+  <!-- 2) Then your converter logic (see below) -->
+  <script src="converter-ffmpegjs.js"></script>
 </body>
 </html>

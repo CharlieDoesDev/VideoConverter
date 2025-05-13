@@ -1,6 +1,11 @@
 // converter-ffmpegjs.js
 
-// UI references
+// 👀 We expect a global `ffmpeg()` function from ffmpeg-webm.js
+if (typeof ffmpeg !== 'function') {
+  throw new Error('Global `ffmpeg` is not defined. Make sure you loaded ffmpeg-webm.js before this script.');
+}
+
+// UI refs
 const dropZone    = document.getElementById('dropZone');
 const fileInput   = document.getElementById('fileInput');
 const convertBtn  = document.getElementById('convertBtn');
@@ -25,7 +30,7 @@ function resetUI() {
   downloadLink.classList.add('hidden');
 }
 
-// Drag & drop & click handlers
+// Drag & drop + file-picker
 ;['dragover','dragleave','drop'].forEach(evt => {
   dropZone.addEventListener(evt, e => {
     e.preventDefault();
@@ -40,10 +45,10 @@ fileInput.addEventListener('change', () => {
   if (fileInput.files[0]) handleFile(fileInput.files[0]);
 });
 
-// File selection
+// When user selects/drops a file
 function handleFile(file) {
   if (!file.name.toLowerCase().endsWith('.mp4')) {
-    alert('Please select an MP4.');
+    alert('Please select an MP4 file.');
     return;
   }
   selectedFile = file;
@@ -57,24 +62,23 @@ convertBtn.addEventListener('click', async () => {
   resetUI();
   showStatus('Reading file…');
 
-  // 1) Load the file into memory
-  const arrayBuffer = await selectedFile.arrayBuffer();
-  const input = new Uint8Array(arrayBuffer);
+  // 1) Read MP4 into Uint8Array
+  const buffer = await selectedFile.arrayBuffer();
+  const inputData = new Uint8Array(buffer);
 
-  // 2) Run FFmpeg-js (synchronous)  
-  showStatus('Converting… (this may take a bit)');
+  // 2) Run ffmpeg.js-UMD synchronously
+  showStatus('Converting… this may block the UI for a bit');
   let result;
   try {
-    result = FFmpeg({
+    result = ffmpeg({
       arguments: [
         '-i', 'input.mp4',
-        '-c:v', 'libvpx',          // VP8
-        '-b:v', '1M',              // 1 Mbps video
-        '-c:a', 'libopus',         // Opus audio
+        '-c:v', 'libvpx',     // VP8
+        '-b:v', '1M',         // 1 Mbps
+        '-c:a', 'libopus',    // Opus audio
         'output.webm'
       ],
-      MEMFS: [{ name: 'input.mp4', data: input }],
-      // no print / printErr callbacks for this minimal example
+      MEMFS: [{ name: 'input.mp4', data: inputData }]
     });
   } catch (err) {
     console.error(err);
@@ -82,15 +86,15 @@ convertBtn.addEventListener('click', async () => {
     return;
   }
 
-  // 3) Retrieve the output
-  const out = result.MEMFS.find(f => f.name === 'output.webm');
-  if (!out) {
+  // 3) Grab the output file from MEMFS
+  const outFile = result.MEMFS.find(f => f.name === 'output.webm');
+  if (!outFile) {
     showStatus('No output generated');
     return;
   }
 
-  // 4) Make a Blob & display
-  const blob = new Blob([out.data], { type: 'video/webm' });
+  // 4) Create Blob URL and show preview + download
+  const blob = new Blob([outFile.data], { type: 'video/webm' });
   const url  = URL.createObjectURL(blob);
 
   preview.src = url;
