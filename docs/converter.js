@@ -1,8 +1,8 @@
 // converter.js
 // ────────────
 
-// 0️⃣  Pull in the ESM build of webm-writer v3.1
-import WebMWriter from 'https://cdn.skypack.dev/webm-writer@0.3.1';
+// 0️⃣  Pull in the pure-ESM WebMWriter build
+import WebMWriter from 'https://cdn.jsdelivr.net/npm/@framekit/webm-writer-esm@1.0.0/dist/webm-writer.esm.js';
 
 // UI refs
 const dropZone      = document.getElementById('dropZone');
@@ -17,7 +17,6 @@ const downloadLink  = document.getElementById('downloadLink');
 
 let selectedFile = null;
 
-// Helpers
 const showStatus = msg => {
   statusDiv.textContent = msg;
   statusDiv.classList.remove('hidden');
@@ -55,19 +54,17 @@ function handleFile(file) {
   resetUI();
 }
 
-// Quality slider
 qualitySlider.addEventListener('input', () => {
   qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
 });
 
-// Conversion
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
   resetUI();
 
   showStatus('Preparing video…');
 
-  // 1) Load the MP4 into a hidden video element
+  // 1) Load video element
   const video = document.createElement('video');
   video.src = URL.createObjectURL(selectedFile);
   video.muted = true;
@@ -81,12 +78,12 @@ convertBtn.addEventListener('click', async () => {
   const duration = video.duration;
   const totalFrames = Math.ceil(fps * duration);
 
-  // 2) Setup WebMWriter (uses WebCodecs under the hood)
+  // 2) Setup WebMWriter with WebCodecs
   const quality = Math.max(0.1, parseFloat(qualitySlider.value));
   const writer  = new WebMWriter({
-    quality,                // scalar 0.1–1.0
-    fileWriter: null,       // in-memory
-    codec: 'vp8',           // or 'vp9'
+    quality,
+    fileWriter: null,
+    codec: 'vp9',         // use vp9 for better compression
     frameRate: fps,
     disableWebAssembly: true
   });
@@ -130,5 +127,4 @@ convertBtn.addEventListener('click', async () => {
   }
 });
 
-// Initial UI state
 resetUI();
