@@ -33,9 +33,9 @@
     <a id="downloadLink" class="download-link hidden">Download WebM</a>
   </div>
 
-  <!-- WebM Writer library (with WebCodecs support) -->
+  <!-- 1) First, load WebMWriter so converter.js can see WebMWriter -->
   <script src="https://unpkg.com/webm-writer@0.4.3/dist/webm-writer.min.js"></script>
-  <!-- Your conversion logic -->
+  <!-- 2) Then load your conversion logic -->
   <script type="module" src="converter.js"></script>
 </body>
 </html>
