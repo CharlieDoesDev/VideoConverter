@@ -73,7 +73,7 @@ qualitySlider.addEventListener('input', () => {
 
 async function loadFFmpegCore() {
   // Pin to the same version for all three assets
-  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist';
+  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.1/dist';
 
   await ffmpeg.load({
     // Wrap the JS files in Blob URLs to avoid CORS/preflight issues
