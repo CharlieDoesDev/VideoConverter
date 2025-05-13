@@ -2,16 +2,18 @@
 
 // 👀 We expect a global `ffmpeg()` function from ffmpeg-webm.js
 if (typeof ffmpeg !== 'function') {
-  throw new Error('Global `ffmpeg` is not defined. Make sure you loaded ffmpeg-webm.js before this script.');
+  throw new Error(
+    'Global `ffmpeg` is not defined. Make sure you loaded ffmpeg-webm.js before this script.'
+  );
 }
 
 // UI refs
-const dropZone    = document.getElementById('dropZone');
-const fileInput   = document.getElementById('fileInput');
-const convertBtn  = document.getElementById('convertBtn');
-const statusDiv   = document.getElementById('status');
-const preview     = document.getElementById('preview');
-const downloadLink= document.getElementById('downloadLink');
+const dropZone     = document.getElementById('dropZone');
+const fileInput    = document.getElementById('fileInput');
+const convertBtn   = document.getElementById('convertBtn');
+const statusDiv    = document.getElementById('status');
+const preview      = document.getElementById('preview');
+const downloadLink = document.getElementById('downloadLink');
 
 let selectedFile = null;
 
@@ -59,6 +61,7 @@ function handleFile(file) {
 // Convert on button click
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
+
   resetUI();
   showStatus('Reading file…');
 
@@ -66,16 +69,18 @@ convertBtn.addEventListener('click', async () => {
   const buffer = await selectedFile.arrayBuffer();
   const inputData = new Uint8Array(buffer);
 
-  // 2) Run ffmpeg.js-UMD synchronously
+  // 2) Run ffmpeg.js-UMD asynchronously
   showStatus('Converting… this may block the UI for a bit');
   let result;
   try {
-    result = ffmpeg({
+    result = await ffmpeg({
       arguments: [
+        '-y',           // auto-yes to overwrite
+        '-nostdin',     // disable all stdin prompts
         '-i', 'input.mp4',
-        '-c:v', 'libvpx',     // VP8
-        '-b:v', '1M',         // 1 Mbps
-        '-c:a', 'libopus',    // Opus audio
+        '-c:v', 'libvpx',  // VP8
+        '-b:v', '1M',      // 1 Mbps
+        '-c:a', 'libopus', // Opus audio
         'output.webm'
       ],
       MEMFS: [{ name: 'input.mp4', data: inputData }]
