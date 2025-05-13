@@ -1,9 +1,15 @@
 // converter.js
 // ────────────
 // Pull ffmpeg.wasm as an ES module from Skypack
-import { createFFmpeg, fetchFile } from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/ffmpeg.min.js?module';
+import { FFmpeg } from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.15';
+const ffmpeg = new FFmpeg({ log: true });
 
-const ffmpeg = createFFmpeg({ log: true });
+ffmpeg.on('progress', ({ ratio }) => { /* … */ });
+await ffmpeg.load({ coreURL: '/path/to/ffmpeg-core.wasm' });
+await ffmpeg.exec(['-i','input.mp4','-c:v','libvpx','output.webm']);
+const out = await ffmpeg.readFile('output.webm');
+
+
 
 /* UI refs */
 const dropZone         = document.getElementById('dropZone');
