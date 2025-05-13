@@ -71,14 +71,16 @@ qualitySlider.addEventListener('input', () => {
   qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
 });
 
-// Load ffmpeg-core dynamically
 async function loadFFmpegCore() {
-  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.1/dist/umd';
+  // Point at the dist folder, not dist/umd
+  const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist';
 
   await ffmpeg.load({
-    coreURL:   await toBlobURL(`${base}/ffmpeg-core.js`,        'text/javascript'),
-    wasmURL:   await toBlobURL(`${base}/ffmpeg-core.wasm`,      'application/wasm'),
-    workerURL: await toBlobURL(`${base}/ffmpeg-core.worker.js`, 'text/javascript'),
+    // wrap the JS files as blob URLs to avoid any CORS/preflight issues
+    coreURL:   await toBlobURL(`${base}/ffmpeg-core.js`,        'application/javascript'),
+    workerURL: await toBlobURL(`${base}/ffmpeg-core.worker.js`, 'application/javascript'),
+    // wasm can be loaded directly since jsDelivr sends CORS headers
+    wasmURL:   `${base}/ffmpeg-core.wasm`,
   });
 
   loaded = true;
