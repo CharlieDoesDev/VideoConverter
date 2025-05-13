@@ -2,30 +2,45 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MP4 to WebM Converter</title>
-  <!-- Include CSS for styling -->
-  <link rel="stylesheet" href="style.css" />
-  <!-- index.html -->
-  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.8/dist/ffmpeg.min.js"></script>
-  <script src="converter-ffmpeg.js"></script>
-
-  <!-- Converter logic -->
-  <script defer src="converter.js"></script>
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div class="container">
-    <!-- Drag-and-drop area -->
-    <div id="dropzone">📁 **Drag & drop an MP4 video here, or click to select**</div>
-    <!-- Hidden file input for click-to-select -->
+    <h1>MP4 to WebM Converter</h1>
+
+    <!-- Drag-and-drop zone (clickable to trigger file input) -->
+    <div id="dropZone">Drag &amp; drop an MP4 video here, or click to select a file</div>
+    <!-- Hidden file input (triggered by drop zone) -->
     <input type="file" id="fileInput" accept="video/mp4" hidden />
-    <!-- Progress bar and status message area -->
-    <div id="progress-container" class="hidden">
-      <div id="progress-bar"></div>
-      <div id="status-text"></div>
+
+    <!-- Quality slider control -->
+    <div class="quality-controls">
+      <label for="qualitySlider">Quality:</label>
+      <input type="range" id="qualitySlider" min="50" max="150" value="100" />
+      <span id="qualityLabel">100%</span>
     </div>
-    <!-- Output download link will appear here -->
-    <div id="output"></div>
+
+    <!-- Convert button -->
+    <button id="convertBtn" disabled>Convert to WebM</button>
+
+    <!-- Progress bar and status message -->
+    <div id="progressContainer" class="hidden">
+      <progress id="progressBar" value="0" max="100"></progress>
+      <span id="progressText">0%</span>
+    </div>
+
+    <!-- Output video preview and download link -->
+    <div id="output" class="hidden">
+      <h2>Output:</h2>
+      <video id="outputVideo" controls playsinline></video><br />
+      <a id="downloadLink" href="#" download="output.webm">Download WebM</a>
+    </div>
   </div>
+
+  <!-- Include FFmpeg.wasm from CDN (UMD build) -->
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+  <!-- Our converter script -->
+  <script src="converter-ffmpeg.js"></script>
 </body>
 </html>
