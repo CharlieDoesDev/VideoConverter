@@ -1,8 +1,8 @@
 // converter.js
 // ────────────
 
-// 0️⃣  Import the pure-ESM WebMWriter build
-import WebMWriter from 'https://cdn.skypack.dev/webm-writer';
+// 0️⃣  Load WebMWriter via require (must be bundled with a CommonJS shim)
+const WebMWriter = require('webm-writer');
 
 // UI refs
 const dropZone      = document.getElementById('dropZone');
@@ -76,9 +76,8 @@ convertBtn.addEventListener('click', async () => {
 
   const fps = video.frameRate || 30;
 
-  // 2) Setup WebMWriter with WebCodecs
+  // 2) Instantiate WebMWriter
   const quality = Math.max(0.1, parseFloat(qualitySlider.value));
-  var WebMWriter = require('webm-writer');
   const writer  = new WebMWriter({
     quality,
     fileWriter: null,
@@ -87,7 +86,7 @@ convertBtn.addEventListener('click', async () => {
     disableWebAssembly: true
   });
 
-  // 3) Draw & encode frames until video ends
+  // 3) Set up canvas for capturing frames
   const canvas = document.createElement('canvas');
   canvas.width  = video.videoWidth;
   canvas.height = video.videoHeight;
@@ -96,6 +95,7 @@ convertBtn.addEventListener('click', async () => {
   let frameCount = 0;
   showStatus(`Encoding…`);
 
+  // 4) Frame loop: stop only when the video ends
   const renderFrame = () => {
     if (video.ended) {
       finish();
@@ -113,13 +113,14 @@ convertBtn.addEventListener('click', async () => {
     }
   };
 
-  // start encoding loop
+  // Kick off encoding once the video is ready
   if (video.readyState >= 2) {
     renderFrame();
   } else {
-    video.addEventListener('loadeddata', () => renderFrame(), { once: true });
+    video.addEventListener('loadeddata', renderFrame, { once: true });
   }
 
+  // 5) Finalize and output
   async function finish() {
     showStatus('Finalizing WebM…');
     const webmBlob = await writer.complete();
@@ -128,7 +129,7 @@ convertBtn.addEventListener('click', async () => {
     preview.src = url;
     preview.classList.remove('hidden');
 
-    downloadLink.href = url;
+    downloadLink.href     = url;
     downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
     downloadLink.classList.remove('hidden');
 
