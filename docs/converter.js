@@ -1,10 +1,10 @@
 // converter.js
 // ────────────
 
-// Ensure WebMWriter is loaded
-if (typeof WebMWriter === 'undefined') {
-  throw new Error('WebMWriter is not loaded. Make sure you include webm-writer.min.js');
-}
+// 0️⃣  Pull in WebMWriter as an ES module
+import WebMWriter from 'https://cdn.skypack.dev/webm-writer@0.4.3';
+
+// 1️⃣  No more load-order check needed
 
 // UI refs
 const dropZone      = document.getElementById('dropZone');
@@ -57,7 +57,7 @@ function handleFile(file) {
   resetUI();
 }
 
-// Quality slider display
+// Quality slider
 qualitySlider.addEventListener('input', () => {
   qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
 });
@@ -69,33 +69,30 @@ convertBtn.addEventListener('click', async () => {
 
   showStatus('Preparing video…');
 
-  // 1) Load the MP4 into a hidden video element
+  // 1) Load video element
   const video = document.createElement('video');
   video.src = URL.createObjectURL(selectedFile);
   video.muted = true;
   video.playsInline = true;
   await video.play().catch(() => {
-    // autoplay might be blocked—seek to start instead
-    video.currentTime = 0;
     new Promise(r => video.addEventListener('loadeddata', r, { once: true }));
   });
 
-  const fps = video.frameRate || 30;        // fallback to 30 if unavailable
+  const fps = video.frameRate || 30;
   const duration = video.duration;
   const totalFrames = Math.ceil(fps * duration);
 
-  // 2) Set up WebMWriter with WebCodecs backend
+  // 2) Setup WebMWriter
   const quality = Math.max(0.1, parseFloat(qualitySlider.value));
   const writer = new WebMWriter({
-    quality,                // 0.1–1.0
-    fileWriter: null,       // in-memory blob
-    codec: 'vp8',           // or 'vp9'
+    quality,
+    fileWriter: null,
+    codec: 'vp8',
     frameRate: fps,
-    webWorkerPath: null,    // we don't need a worker; writer will use WebCodecs
-    disableWebAssembly: true // force WebCodecs path
+    disableWebAssembly: true
   });
 
-  // 3) Draw & encode each frame
+  // 3) Encode frames
   const canvas = document.createElement('canvas');
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
@@ -104,27 +101,20 @@ convertBtn.addEventListener('click', async () => {
   let frameCount = 0;
   showStatus(`Encoding 0 / ${totalFrames}`);
 
-  // Use requestVideoFrameCallback if supported
   const renderFrame = () => {
     if (video.ended || frameCount >= totalFrames) {
       finish();
       return;
     }
-    // draw current frame
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    // add to webm
+    ctx.drawImage(video, 0, 0);
     writer.addFrame(canvas);
     frameCount++;
     showStatus(`Encoding ${frameCount} / ${totalFrames}`);
-
-    // schedule next
     video.requestVideoFrameCallback(renderFrame);
   };
 
-  // Start frame loop
   renderFrame();
 
-  // 4) Finalize and output
   async function finish() {
     showStatus('Finalizing WebM…');
     const webmBlob = await writer.complete();
@@ -140,3 +130,6 @@ convertBtn.addEventListener('click', async () => {
     showStatus('Done!');
   }
 });
+
+// Initial state
+resetUI();
