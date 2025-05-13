@@ -1,10 +1,8 @@
 // converter-ffmpegjs.js
 
-// 👀 We expect a global `ffmpeg()` function from ffmpeg-webm.js
-if (typeof ffmpeg !== 'function') {
-  throw new Error(
-    'Global `ffmpeg` is not defined. Make sure you loaded ffmpeg-webm.js before this script.'
-  );
+// 👀 We expect a global `Worker`-compatible script at converter-worker.js
+if (typeof Worker !== 'function') {
+  throw new Error('This browser doesn’t support Web Workers.');
 }
 
 // UI refs
@@ -47,7 +45,6 @@ fileInput.addEventListener('change', () => {
   if (fileInput.files[0]) handleFile(fileInput.files[0]);
 });
 
-// When user selects/drops a file
 function handleFile(file) {
   if (!file.name.toLowerCase().endsWith('.mp4')) {
     alert('Please select an MP4 file.');
@@ -58,59 +55,54 @@ function handleFile(file) {
   resetUI();
 }
 
-// Convert on button click
+// Create and wire up the Worker
+const worker = new Worker('converter-worker.js');
+
+worker.onmessage = e => {
+  if (e.data.type === 'done') {
+    const outFile = e.data.MEMFS.find(f => f.name === 'output.webm');
+    if (!outFile) return showStatus('No output generated');
+
+    const blob = new Blob([outFile.data], { type: 'video/webm' });
+    const url  = URL.createObjectURL(blob);
+
+    preview.src = url;
+    preview.classList.remove('hidden');
+
+    downloadLink.href = url;
+    downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
+    downloadLink.textContent = 'Download WebM';
+    downloadLink.classList.remove('hidden');
+
+    showStatus('Done!');
+  }
+  else if (e.data.type === 'error') {
+    showStatus('Conversion failed: ' + e.data.message);
+  }
+};
+
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
 
   resetUI();
   showStatus('Reading file…');
 
-  // 1) Read MP4 into Uint8Array
-  const buffer = await selectedFile.arrayBuffer();
+  const buffer   = await selectedFile.arrayBuffer();
   const inputData = new Uint8Array(buffer);
 
-  // 2) Run ffmpeg.js-UMD asynchronously
-  showStatus('Converting… this may block the UI for a bit');
-  let result;
-  try {
-    result = await ffmpeg({
-      arguments: [
-        '-y',           // auto-yes to overwrite
-        '-nostdin',     // disable all stdin prompts
-        '-i', 'input.mp4',
-        '-c:v', 'libvpx',  // VP8
-        '-b:v', '1M',      // 1 Mbps
-        '-c:a', 'libopus', // Opus audio
-        'output.webm'
-      ],
-      MEMFS: [{ name: 'input.mp4', data: inputData }]
-    });
-  } catch (err) {
-    console.error(err);
-    showStatus('Conversion failed: ' + err.message);
-    return;
-  }
+  showStatus('Converting…');
 
-  // 3) Grab the output file from MEMFS
-  const outFile = result.MEMFS.find(f => f.name === 'output.webm');
-  if (!outFile) {
-    showStatus('No output generated');
-    return;
-  }
-
-  // 4) Create Blob URL and show preview + download
-  const blob = new Blob([outFile.data], { type: 'video/webm' });
-  const url  = URL.createObjectURL(blob);
-
-  preview.src = url;
-  preview.classList.remove('hidden');
-
-  downloadLink.href = url;
-  downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
-  downloadLink.textContent = 'Download WebM';
-  downloadLink.classList.remove('hidden');
-
-  showStatus('Done!');
+  worker.postMessage({
+    inputData,
+    args: [
+      '-y',        // overwrite without asking
+      '-nostdin',  // disable stdin prompts
+      '-i','input.mp4',
+      '-c:v','libvpx','-b:v','1M',
+      '-c:a','libopus',
+      'output.webm'
+    ]
+  });
 });
 
 resetUI();
