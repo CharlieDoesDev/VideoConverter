@@ -2,7 +2,7 @@
 // ────────────
 
 // 0️⃣  Pull in WebMWriter as an ES module
-import WebMWriter from 'https://cdn.skypack.dev/webm-writer@0.4.3';
+import WebMWriter from 'https://cdn.skypack.dev/webm-writer@0.3.1';
 
 // 1️⃣  No more load-order check needed
 
