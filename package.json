@@ -6,14 +6,15 @@
     "build": "rollup -c"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
     "mp4box": "^0.5.4",
     "webm-muxer": "^5.1.2"
   },
   "devDependencies": {
-  "@rollup/plugin-commonjs": "^28.0.3",
-  "@rollup/plugin-node-resolve": "^16.0.1",
-  "@rollup/plugin-terser": "^0.4.4",
-  "rollup": "^2.79.2"
+    "@rollup/plugin-commonjs": "^28.0.3",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup": "^2.79.2"
   },
   "author": "Simon Swartout",
   "license": "MIT"
