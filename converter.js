@@ -1,266 +1,231 @@
-(async function() {
-  // UI element references
-  const dropzone = document.getElementById('dropzone');
-  const fileInput = document.getElementById('fileInput');
-  const progressContainer = document.getElementById('progress-container');
-  const progressBar = document.getElementById('progress-bar');
-  const statusText = document.getElementById('status-text');
-  const outputDiv = document.getElementById('output');
+// converter.js
+// Requires in index.html:
+// <script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.4/dist/mp4box.all.min.js"></script>
+// <script src="https://cdn.jsdelivr.net/npm/webm-muxer@5.1.2/build/webm-muxer.js"></script>
 
-  // Feature detection: ensure WebCodecs is available
-  const supportsWebCodecs = ('VideoEncoder' in window) && ('VideoDecoder' in window);
-  if (!supportsWebCodecs) {
-    dropzone.textContent = '❌ Your browser does not support the WebCodecs API required for conversion.';
+(async function() {
+  const { Muxer, ArrayBufferTarget } = WebMMuxer;
+  const { createFile: createMP4BoxFile } = MP4Box;
+
+  // UI elements
+  const dropzone          = document.getElementById('dropzone');
+  const fileInput         = document.getElementById('fileInput');
+  const progressContainer = document.getElementById('progress-container');
+  const progressBar       = document.getElementById('progress-bar');
+  const statusText        = document.getElementById('status-text');
+  const outputDiv         = document.getElementById('output');
+
+  // Feature check
+  if (!window.VideoDecoder || !window.VideoEncoder) {
+    dropzone.textContent = '❌ WebCodecs not supported.';
     dropzone.style.cursor = 'not-allowed';
     return;
   }
 
-  // Utility: Update progress bar and text
-  function updateProgress(percent, message) {
-    progressBar.style.width = percent + '%';
-    statusText.textContent = message || '';
-  }
-
-  // Utility: Reset UI to initial state for new conversion
+  // Reset UI
   function resetUI() {
     progressBar.style.width = '0%';
     statusText.textContent = '';
     progressContainer.classList.add('hidden');
-    outputDiv.innerHTML = '';
     dropzone.classList.remove('disabled');
-    dropzone.innerHTML = '📁 <b>Drag & drop an MP4 video here, or click to select</b>';
+    dropzone.textContent = '📁 Drag & drop an MP4 here, or click to select';
+    outputDiv.innerHTML = '';
   }
-
-  // Initialize UI state
   resetUI();
 
-  // Drag & drop events
-  dropzone.addEventListener('dragover', (e) => {
+  // Progress update
+  function updateProgress(pct, msg) {
+    progressBar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+    statusText.textContent = msg || '';
+  }
+
+  // Drag & drop + click
+  dropzone.addEventListener('dragover', e => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
     dropzone.classList.add('dragover');
   });
-  dropzone.addEventListener('dragleave', () => {
-    dropzone.classList.remove('dragover');
-  });
-  dropzone.addEventListener('drop', (e) => {
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
     e.preventDefault();
     dropzone.classList.remove('dragover');
-    if (e.dataTransfer.files.length > 0) {
-      handleFile(e.dataTransfer.files[0]);
-    }
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
   });
-  // Click on dropzone opens file dialog
   dropzone.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
-    if (fileInput.files.length > 0) {
-      handleFile(fileInput.files[0]);
-    }
+    if (fileInput.files[0]) handleFile(fileInput.files[0]);
   });
 
-  // Main file handling and conversion function
+  // Main handler
   async function handleFile(file) {
-    // Only accept MP4 files
-    if (!file.name.toLowerCase().endsWith('.mp4') && file.type !== 'video/mp4') {
-      alert('Please select an MP4 video file.');
+    if (!file.name.toLowerCase().endsWith('.mp4')) {
+      alert('Please select an MP4 file.');
       return;
     }
-
-    // Prepare UI for conversion
-    dropzone.innerHTML = '⌛ Processing...';
     dropzone.classList.add('disabled');
     progressContainer.classList.remove('hidden');
-    updateProgress(0, 'Starting conversion...');
+    updateProgress(0, 'Reading file…');
 
     try {
-      // Read file into ArrayBuffer
-      const arrayBuffer = await file.arrayBuffer();
-      // Initialize MP4Box for parsing
-      const mp4boxfile = MP4Box.createFile();
-      let videoTrackId = null;
-      let videoTrackInfo = null;
-      let totalFrames = 0;
+      // Step 1: Demux MP4
+      const { track, samples } = await demuxMp4(file);
+      const total = samples.length;
+      updateProgress(20, 'Demux complete');
 
-      // Set up MP4Box event callbacks
-      mp4boxfile.onError = (e) => { throw new Error('MP4 parsing error: ' + e); };
-      mp4boxfile.onReady = (info) => {
-        // Find first video track
-        const videoTracks = info.tracks.filter(t => t.video);
-        if (videoTracks.length === 0) {
-          throw new Error('No video track found in file.');
-        }
-        videoTrackInfo = videoTracks[0];
-        videoTrackId = videoTrackInfo.id;
-        totalFrames = videoTrackInfo.nb_samples || 0;
-        // Set extraction options for the video track (all samples, starting at RAP)
-        mp4boxfile.setExtractionOptions(videoTrackId, null, { nbSamples: totalFrames, rapAlignement: true });
-        mp4boxfile.start();
-      };
+      // Step 2: Build decoder config
+      const decoderConfig = { codec: track.codec };
+      // dimensions
+      if (track.video?.width && track.video?.height) {
+        decoderConfig.codedWidth  = track.video.width;
+        decoderConfig.codedHeight = track.video.height;
+      }
+      // H.264 out-of-band config
+      if (track.codec.startsWith('avc1')) {
+        if (!track.avcC) throw new Error('Missing H.264 config (avcC)');
+        const prefix = new Uint8Array([0,0,0,1]);
+        const parts = [];
+        for (const sps of track.avcC.sequenceParameterSets) parts.push(prefix, new Uint8Array(sps));
+        for (const pps of track.avcC.pictureParameterSets)    parts.push(prefix, new Uint8Array(pps));
+        decoderConfig.description = concat(parts).buffer;
+      }
+      // H.265
+      if (track.codec.startsWith('hvc1') && track.hvcC?.buffer) {
+        decoderConfig.description = track.hvcC.buffer;
+      }
+      // VP9
+      if (track.codec.startsWith('vp09') && track.vpcC?.buffer) {
+        decoderConfig.description = track.vpcC.buffer;
+      }
+      // AV1
+      if (track.codec.startsWith('av01') && track.av1C?.buffer) {
+        decoderConfig.description = track.av1C.buffer;
+      }
 
-      // Create WebCodecs decoder/encoder and muxer (to be configured later when ready)
-      let decoder, encoder, muxer;
-      // Flags to ensure one-time setup
-      let decoderConfigured = false;
-      let framesDecoded = 0;
+      // Step 3: Support checks
+      updateProgress(25, 'Checking support…');
+      const decSup = await VideoDecoder.isConfigSupported(decoderConfig);
+      if (!decSup.supported) {
+        throw new Error(`Decoding ${track.codec} not supported.`);
+      }
+      const encConfig = { codec:'vp8', width:track.video.width, height:track.video.height };
+      const encSup = await VideoEncoder.isConfigSupported(encConfig);
+      if (!encSup.supported) {
+        throw new Error('VP8 encoding not supported.');
+      }
 
-      // Decoder output callback: encode video frames as they arrive
-      const handleFrame = (frame) => {
-        try {
-          // On receiving a decoded frame, encode it to VP8
-          encoder.encode(frame);  // let encoder decide keyFrame internally
+      // Step 4: Initialize muxer, decoder, encoder
+      updateProgress(30, 'Initializing codecs…');
+      const muxer   = new Muxer({ target: new ArrayBufferTarget(), video: { codec:'V_VP8', width:track.video.width, height:track.video.height } });
+      let decodedCount = 0;
+
+      const decoder = new VideoDecoder({
+        output: frame => {
+          encoder.encode(frame);
           frame.close();
-          framesDecoded++;
-          // Update progress based on frames processed
-          if (totalFrames) {
-            const percent = Math.round((framesDecoded / totalFrames) * 100);
-            updateProgress(percent, `Transcoding frame ${framesDecoded} of ${totalFrames}...`);
-          }
-        } catch (err) {
-          console.error('Error during frame encode:', err);
+          decodedCount++;
+          updateProgress(30 + Math.round((decodedCount/total)*60), `Transcoding frame ${decodedCount}/${total}…`);
+        },
+        error: e => { throw e; }
+      });
+      decoder.configure(decoderConfig);
+
+      const encoder = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        error: e => { throw e; }
+      });
+      encoder.configure(encConfig);
+
+      // Step 5: Feed samples
+      updateProgress(35, 'Feeding samples…');
+      for (const s of samples) {
+        let data = new Uint8Array(s.data);
+        // For in-band H.264 (avc3), convert to Annex-B
+        if (!decoderConfig.description && track.codec.startsWith('avc3')) {
+          data = mp4ToAnnexB(s.data);
         }
-      };
+        const chunk = new EncodedVideoChunk({
+          type:      s.is_rap? 'key':'delta',
+          timestamp: Math.round(s.cts * (1e6/track.timescale)),
+          data
+        });
+        decoder.decode(chunk);
+      }
 
-      // Encoder output callback: feed encoded chunk to muxer
-      const handleChunk = (chunk, metadata) => {
-        muxer.addVideoChunk(chunk, metadata);
-      };
-
-      // Set up sample extraction callback
-      mp4boxfile.onSamples = async (id, user, samples) => {
-        // Only initialize decoder, encoder, and muxer once (on first batch of samples)
-        if (!decoderConfigured) {
-          decoderConfigured = true;
-          const track = videoTrackInfo;
-          // Prepare VideoDecoder config for the input codec
-          /** Determine codec string and extradata (if needed) **/
-          const codec = track.codec;  // e.g., "avc1.64001e", "vp09.00.10.08", etc.
-          const decoderConfig = { codec };
-          // Set coded width/height if available (for better compatibility)
-          if (track.video && track.video.width && track.video.height) {
-            decoderConfig.codedWidth = track.video.width;
-            decoderConfig.codedHeight = track.video.height;
-          }
-          // If codec is H.264/AVC or similar that needs config bytes:
-          if ((codec.startsWith('avc1') || codec.startsWith('avc3')) && samples[0]?.description) {
-            // Attempt to get AVC config (SPS/PPS) from the sample description
-            const desc = samples[0].description;
-            if (desc.avcC) {
-              // Use the avcC box bytes as description:contentReference[oaicite:4]{index=4}
-              decoderConfig.description = desc.avcC; 
-            } else {
-              // Fallback: extract SPS/PPS from first sample in-stream (if avcC not provided)
-              decoderConfig.description = extractAvcConfig(samples[0].data);
-            }
-          }
-          // If codec is AV1 and has config box
-          if (codec.startsWith('av01') && samples[0]?.description && samples[0].description.av1C) {
-            decoderConfig.description = samples[0].description.av1C;
-          }
-          // If codec is VP9 and has config (vpcC) box
-          if (codec.startsWith('vp09') && samples[0]?.description && samples[0].description.vpcC) {
-            decoderConfig.description = samples[0].description.vpcC;
-          }
-
-          // Check decoder support for this config:contentReference[oaicite:5]{index=5}
-          const supportInfo = await VideoDecoder.isConfigSupported(decoderConfig);
-          if (!supportInfo.supported) {
-            throw new Error(`Decoding codec ${codec} is not supported on this platform.`);
-          }
-
-          // Initialize decoder
-          decoder = new VideoDecoder({
-            output: handleFrame,
-            error: e => console.error('Decoder error:', e)
-          });
-          decoder.configure(decoderConfig);
-
-          // Check encoder support for VP8 output
-          const encConfig = { codec: 'vp8', width: track.video.width, height: track.video.height };
-          const encSupport = await VideoEncoder.isConfigSupported(encConfig);
-          if (!encSupport.supported) {
-            throw new Error('VP8 encoding is not supported in this browser.');
-          }
-
-          // Initialize muxer for WebM output (video track only):contentReference[oaicite:6]{index=6}
-          muxer = new WebMMuxer({
-            target: 'buffer',  // store output in ArrayBuffer internally
-            video: { codec: 'V_VP8', width: track.video.width, height: track.video.height }
-          });
-          // Initialize encoder
-          encoder = new VideoEncoder({
-            output: handleChunk,
-            error: e => console.error('Encoder error:', e)
-          });
-          encoder.configure(encConfig);
-        }
-
-        // Process each video sample: feed to decoder
-        for (const sample of samples) {
-          // Create EncodedVideoChunk from sample
-          const chunk = new EncodedVideoChunk({
-            type: sample.is_rap ? 'key' : 'delta',
-            timestamp: Math.round(sample.cts * (1000000 / videoTrackInfo.timescale)), // microseconds
-            data: new Uint8Array(sample.data)  // copy sample data
-          });
-          decoder.decode(chunk);
-        }
-
-        // Release the memory of processed samples from mp4box
-        const lastSampleNum = samples[samples.length - 1].number;
-        mp4boxfile.releaseUsedSamples(id, lastSampleNum);
-      };
-
-      // Append the entire file buffer to mp4box (parsing happens here)
-      arrayBuffer.fileStart = 0;
-      mp4boxfile.appendBuffer(arrayBuffer);
-      mp4boxfile.flush();  // signal end of file data
-
-      // Wait for all decoding to finish
+      // Step 6: Flush and finalize
       await decoder.flush();
-      // Wait for all encoding to finish
       await encoder.flush();
-      // Finalize WebM file
+      updateProgress(95, 'Finalizing…');
       const webmBuffer = muxer.finalize();
-      const webmBlob = new Blob([webmBuffer], { type: 'video/webm' });
+      const blob = new Blob([webmBuffer], { type:'video/webm' });
+      const url  = URL.createObjectURL(blob);
+      const name = file.name.replace(/\.mp4$/i, '') + '.webm';
 
-      // Provide download link to user
-      const fileName = file.name.replace(/\.[^/.]+$/, ''); // name without extension
-      const downloadName = fileName + '_converted.webm';
-      const url = URL.createObjectURL(webmBlob);
-      outputDiv.innerHTML = `✅ Conversion complete. <a href="${url}" download="${downloadName}">Download WebM</a>`;
-      updateProgress(100, 'Conversion complete.');
+      // Show download link
+      outputDiv.innerHTML = `✅ Complete! <a href="${url}" download="${name}">Download WebM</a>`;
+      updateProgress(100, 'Done');
     } catch (err) {
       console.error(err);
-      statusText.textContent = 'Error: ' + err.message;
+      updateProgress(0, 'Error: ' + err.message);
+      setTimeout(resetUI, 4000);
     }
   }
 
-  // Helper: Extract SPS/PPS NAL units from raw H.264 sample data to build decoder config:contentReference[oaicite:7]{index=7}
-  function extractAvcConfig(sampleData) {
-    // Parse the first sample for SPS/PPS (assuming length-prefixed NALs)
-    const dataView = new DataView(sampleData);
-    let offset = 0;
-    const spsCount = 1; // typically one SPS
-    const ppsCount = 1; // typically one PPS
-    const configArray = [];
-    // Extract SPS
-    if (sampleData.byteLength > 4) {
-      const spsLength = dataView.getUint32(offset); offset += 4;
-      configArray.push(new Uint8Array(sampleData, offset, spsLength));
-      offset += spsLength;
-      // Extract PPS
-      if (sampleData.byteLength >= offset + 4) {
-        const ppsLength = dataView.getUint32(offset); offset += 4;
-        configArray.push(new Uint8Array(sampleData, offset, ppsLength));
-        // No need to offset further for config
+  // Demux helper
+  async function demuxMp4(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    arrayBuffer.fileStart = 0;
+    const mp4boxFile = createMP4BoxFile();
+    let trackInfo, samples = [];
+
+    return new Promise((resolve, reject) => {
+      mp4boxFile.onError = e => reject(new Error(e));
+      mp4boxFile.onReady = info => {
+        trackInfo = info.tracks.find(t => t.video);
+        if (!trackInfo) return reject(new Error('No video track'));
+        mp4boxFile.setExtractionOptions(trackInfo.id, null, { nbSamples: trackInfo.nb_samples, rapAlignement:true });
+        mp4boxFile.start();
+      };
+      mp4boxFile.onSamples = (_id, _usr, sArr) => samples.push(...sArr);
+      try {
+        mp4boxFile.appendBuffer(arrayBuffer);
+        mp4boxFile.flush();
+      } catch (e) {
+        reject(e);
       }
+      (function wait() {
+        if (trackInfo && samples.length >= trackInfo.nb_samples) {
+          resolve({ track: trackInfo, samples });
+        } else {
+          setTimeout(wait, 50);
+        }
+      })();
+    });
+  }
+
+  // Convert MP4-style NAL (length-prefixed) to Annex-B (start-code prefixed)
+  function mp4ToAnnexB(buffer) {
+    const dv = new DataView(buffer);
+    let offset = 0;
+    const parts = [];
+    const prefix = new Uint8Array([0,0,0,1]);
+    while (offset + 4 <= dv.byteLength) {
+      const size = dv.getUint32(offset); offset += 4;
+      if (offset + size > dv.byteLength) break;
+      parts.push(prefix);
+      parts.push(new Uint8Array(buffer, offset, size));
+      offset += size;
     }
-    // Concatenate SPS/PPS arrays into one Uint8Array (AVCDecoderConfigRecord format expectation)
-    let totalLen = 0;
-    configArray.forEach(arr => totalLen += arr.length);
-    const combined = new Uint8Array(totalLen);
-    let cur = 0;
-    configArray.forEach(arr => { combined.set(arr, cur); cur += arr.length; });
-    return combined.buffer;
+    return concat(parts);
+  }
+
+  // Concatenate Uint8Arrays into one
+  function concat(arrays) {
+    let len = 0; arrays.forEach(a => len += a.length);
+    const out = new Uint8Array(len);
+    let pos = 0;
+    for (const a of arrays) {
+      out.set(a, pos);
+      pos += a.length;
+    }
+    return out;
   }
 })();
