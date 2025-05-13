@@ -1,17 +1,10 @@
-// converter.js
-// ────────────
-// Pull ffmpeg.wasm as an ES module from Skypack
-import { FFmpeg } from 'https://cdn.skypack.dev/@ffmpeg/ffmpeg@0.12.15';
-const ffmpeg = new FFmpeg({ log: true });
+// Pull the legacy ESM build with CORS support from jsDelivr v0.11.6
+import { createFFmpeg, fetchFile }
+  from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
 
-ffmpeg.on('progress', ({ ratio }) => { /* … */ });
-await ffmpeg.load({ coreURL: '/path/to/ffmpeg-core.wasm' });
-await ffmpeg.exec(['-i','input.mp4','-c:v','libvpx','output.webm']);
-const out = await ffmpeg.readFile('output.webm');
+const ffmpeg = createFFmpeg({ log: true });
 
-
-
-/* UI refs */
+/* UI references */
 const dropZone         = document.getElementById('dropZone');
 const selectBtn        = document.getElementById('selectBtn');
 const fileInput        = document.getElementById('fileInput');
@@ -76,7 +69,7 @@ qualitySlider.addEventListener('input', () => {
   qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
 });
 
-/* Convert */
+/* Conversion */
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
 

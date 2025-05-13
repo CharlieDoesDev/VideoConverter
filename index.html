@@ -9,7 +9,7 @@
   <div class="container">
     <h1>MP4 → WebM Converter</h1>
 
-    <!-- Drop-zone + browse button -->
+    <!-- Drop-zone + browse -->
     <div id="dropZone" class="drop-zone">
       <p>Drag &amp; drop an MP4 here, or <button id="selectBtn">browse</button></p>
       <input type="file" id="fileInput" accept="video/mp4" hidden />
@@ -31,15 +31,15 @@
       <span id="progressText">0%</span>
     </div>
 
-    <!-- Status messages -->
+    <!-- Status message -->
     <div id="status" class="status hidden"></div>
 
-    <!-- Output preview + download -->
+    <!-- Output preview & download -->
     <video id="preview" controls class="hidden"></video>
     <a id="downloadLink" class="download-link hidden">Download WebM</a>
   </div>
 
-  <!-- ES module that pulls ffmpeg.wasm from UNPKG with proper CORS+module support -->
+  <!-- ES module loading ffmpeg.wasm from jsDelivr -->
   <script type="module" src="converter.js"></script>
 </body>
 </html>
