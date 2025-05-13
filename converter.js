@@ -1,30 +1,35 @@
-import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg';
+// converter.js
+// ────────────
+// Pull ffmpeg.wasm as an ES module from UNPKG. The "?module" flag tells unpkg
+// to serve the package’s ESM entrypoint (respecting its "module" field).
+import { createFFmpeg, fetchFile } 
+  from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.15?module';
 
 const ffmpeg = createFFmpeg({ log: true });
 
-/* UI elements */
-const dropZone      = document.getElementById('dropZone');
-const selectBtn     = document.getElementById('selectBtn');
-const fileInput     = document.getElementById('fileInput');
-const qualitySlider = document.getElementById('qualitySlider');
-const qualityValue  = document.getElementById('qualityValue');
-const convertBtn    = document.getElementById('convertBtn');
-const progressBar   = document.getElementById('progressBar');
-const progressText  = document.getElementById('progressText');
-const statusDiv     = document.getElementById('status');
-const preview       = document.getElementById('preview');
-const downloadLink  = document.getElementById('downloadLink');
-const progressContainer = document.getElementById('progressContainer');
+/* UI refs */
+const dropZone         = document.getElementById('dropZone');
+const selectBtn        = document.getElementById('selectBtn');
+const fileInput        = document.getElementById('fileInput');
+const qualitySlider    = document.getElementById('qualitySlider');
+const qualityValue     = document.getElementById('qualityValue');
+const convertBtn       = document.getElementById('convertBtn');
+const progressContainer= document.getElementById('progressContainer');
+const progressBar      = document.getElementById('progressBar');
+const progressText     = document.getElementById('progressText');
+const statusDiv        = document.getElementById('status');
+const preview          = document.getElementById('preview');
+const downloadLink     = document.getElementById('downloadLink');
 
 let selectedFile = null;
 
 /* Helpers */
-function show(el)   { el.classList.remove('hidden'); }
-function hide(el)   { el.classList.add('hidden'); }
-function setStatus(msg) {
-  statusDiv.textContent = msg;
+const show = el => el.classList.remove('hidden');
+const hide = el => el.classList.add('hidden');
+const setStatus = txt => {
+  statusDiv.textContent = txt;
   show(statusDiv);
-}
+};
 function resetUI() {
   convertBtn.disabled = !selectedFile;
   hide(statusDiv);
@@ -42,7 +47,7 @@ fileInput.addEventListener('change', () => {
 });
 
 /* Drag & drop */
-;['dragover','dragleave','drop'].forEach(evt => {
+['dragover','dragleave','drop'].forEach(evt => {
   dropZone.addEventListener(evt, e => {
     e.preventDefault();
     dropZone.classList.toggle('hover', evt === 'dragover');
@@ -62,26 +67,23 @@ function handleFile(file) {
   resetUI();
 }
 
-/* Quality display */
+/* Quality slider */
 qualitySlider.addEventListener('input', () => {
   qualityValue.textContent = parseFloat(qualitySlider.value).toFixed(1);
 });
 
-/* Conversion */
+/* Convert */
 convertBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
 
   resetUI();
   setStatus('Loading FFmpeg…');
-  if (!ffmpeg.isLoaded()) {
-    await ffmpeg.load();
-  }
+  if (!ffmpeg.isLoaded()) await ffmpeg.load();
 
   setStatus('Reading file…');
   const data = await fetchFile(selectedFile);
   ffmpeg.FS('writeFile', 'input.mp4', data);
 
-  /* Show progress */
   ffmpeg.setProgress(({ ratio }) => {
     show(progressContainer);
     progressBar.value = ratio;
@@ -90,9 +92,9 @@ convertBtn.addEventListener('click', async () => {
     setStatus(`Converting… ${pct}%`);
   });
 
-  /* Run encode with quality mapped to bitrate multiplier */
-  const quality = parseFloat(qualitySlider.value);
-  const bitrate = `${Math.round(quality * 1000)}k`;
+  // Map quality slider (0.1–5) to bitrate (100k–5000k):
+  const qp = Math.max(0.1, parseFloat(qualitySlider.value));
+  const bitrate = `${Math.round(qp * 1000)}k`;
 
   try {
     await ffmpeg.run(
@@ -107,17 +109,16 @@ convertBtn.addEventListener('click', async () => {
     return setStatus('Conversion failed: ' + err.message);
   }
 
-  /* Grab output */
   setStatus('Finalizing…');
-  const outData = ffmpeg.FS('readFile', 'output.webm');
-  const blob    = new Blob([outData.buffer], { type: 'video/webm' });
-  const url     = URL.createObjectURL(blob);
+  const out = ffmpeg.FS('readFile', 'output.webm');
+  const blob = new Blob([out.buffer], { type: 'video/webm' });
+  const url  = URL.createObjectURL(blob);
 
   preview.src = url;
   show(preview);
 
-  downloadLink.href     = url;
-  downloadLink.download = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
+  downloadLink.href      = url;
+  downloadLink.download  = selectedFile.name.replace(/\.mp4$/i, '') + '.webm';
   show(downloadLink);
 
   setStatus('Done!');

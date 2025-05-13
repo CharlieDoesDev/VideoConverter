@@ -1,4 +1,4 @@
-/* General reset & page styling */
+/* Reset & page */
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -22,7 +22,7 @@ h1 {
   color: #007acc;
 }
 
-/* Drop zone */
+/* Drop-zone */
 .drop-zone {
   padding: 2rem;
   border: 2px dashed #bbb;
@@ -34,9 +34,7 @@ h1 {
   background: #e8f0ff;
   border-color: #007acc;
 }
-.drop-zone p {
-  margin: 0;
-}
+.drop-zone p { margin: 0; }
 .drop-zone button {
   background: none;
   border: none;
@@ -46,9 +44,7 @@ h1 {
   text-decoration: underline;
   padding: 0;
 }
-.drop-zone button:hover {
-  color: #005f99;
-}
+.drop-zone button:hover { color: #005f99; }
 
 /* Quality slider */
 .quality-controls {
@@ -57,9 +53,7 @@ h1 {
   margin: 1.5rem 0;
   gap: 0.5rem;
 }
-.quality-controls label {
-  font-weight: bold;
-}
+.quality-controls label { font-weight: bold; }
 #qualityValue {
   width: 2.5em;
   text-align: right;
@@ -68,14 +62,10 @@ h1 {
 input[type=range] {
   flex: 1;
   cursor: pointer;
-}
-input[type=range]:focus {
-  outline: none;
-}
-
-/* Slider thumb & track */
-input[type=range]::-webkit-slider-runnable-track {
-  height: 6px; background: #ddd; border-radius: 3px;
+  -webkit-appearance: none;
+  height: 6px;
+  background: #ddd;
+  border-radius: 3px;
 }
 input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -84,24 +74,16 @@ input[type=range]::-webkit-slider-thumb {
   margin-top: -6px;
   transition: background 0.3s;
 }
-input[type=range]::-webkit-slider-thumb:hover {
-  background: #005f99;
-}
-input[type=range]::-moz-range-track {
-  height: 6px; background: #ddd; border-radius: 3px;
-}
+input[type=range]::-webkit-slider-thumb:hover { background: #005f99; }
 input[type=range]::-moz-range-thumb {
   width: 18px; height: 18px;
   background: #007acc; border-radius: 50%;
   transition: background 0.3s;
 }
-input[type=range]::-moz-range-thumb:hover {
-  background: #005f99;
-}
+input[type=range]::-moz-range-thumb:hover { background: #005f99; }
 
-/* Button */
+/* Convert button */
 #convertBtn {
-  display: block;
   width: 100%;
   background: #007acc;
   color: #fff;
@@ -142,9 +124,7 @@ input[type=range]::-moz-range-thumb:hover {
 #progressBar::-moz-progress-bar {
   background: #4caf50; border-radius: 6px;
 }
-#progressText {
-  font-size: 0.9rem;
-}
+#progressText { font-size: 0.9rem; }
 
 /* Status */
 .status {
@@ -153,7 +133,7 @@ input[type=range]::-moz-range-thumb:hover {
   margin-bottom: 1rem;
 }
 
-/* Video & download link */
+/* Output */
 #preview {
   width: 100%;
   margin-top: 1rem;
@@ -170,11 +150,7 @@ input[type=range]::-moz-range-thumb:hover {
   border-radius: 4px;
   transition: background 0.3s;
 }
-.download-link:hover {
-  background: #388e3c;
-}
+.download-link:hover { background: #388e3c; }
 
 /* Utility */
-.hidden {
-  display: none !important;
-}
+.hidden { display: none !important; }
