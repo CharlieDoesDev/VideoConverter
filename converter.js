@@ -72,14 +72,14 @@ qualitySlider.addEventListener('input', () => {
 });
 
 async function loadFFmpegCore() {
-  // Point at the dist folder, not dist/umd
+  // Pin to the same version for all three assets
   const base = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist';
 
   await ffmpeg.load({
-    // wrap the JS files as blob URLs to avoid any CORS/preflight issues
+    // Wrap the JS files in Blob URLs to avoid CORS/preflight issues
     coreURL:   await toBlobURL(`${base}/ffmpeg-core.js`,        'application/javascript'),
     workerURL: await toBlobURL(`${base}/ffmpeg-core.worker.js`, 'application/javascript'),
-    // wasm can be loaded directly since jsDelivr sends CORS headers
+    // The WASM file itself can be fetched directly (jsDelivr sends CORS headers)
     wasmURL:   `${base}/ffmpeg-core.wasm`,
   });
 
