@@ -1,23 +1,19 @@
 {
-  "name": "video-converter",
+  "name": "mp4-to-webm-converter",
   "version": "1.0.0",
-  "description": "Static MP4→WebM converter using WebCodecs, mp4box.js & webm-muxer",
   "scripts": {
-    "build": "rollup -c"
+    "build": "rollup -c",
+    "serve": "npx serve docs"
   },
   "dependencies": {
-    "@ffmpeg/core": "^0.12.1",
-    "@ffmpeg/core-mt": "^0.12.6",
-    "@ffmpeg/ffmpeg": "^0.12.1",
-    "mp4box": "^0.5.4",
-    "webm-muxer": "^5.1.2"
+    "@ffmpeg/ffmpeg": "^0.12.6",
+    "@ffmpeg/util":  "^0.12.6"
   },
   "devDependencies": {
-    "@rollup/plugin-commonjs": "^28.0.3",
-    "@rollup/plugin-node-resolve": "^16.0.1",
-    "@rollup/plugin-terser": "^0.4.4",
-    "rollup": "^2.79.2"
-  },
-  "author": "Simon Swartout",
-  "license": "MIT"
+    "@rollup/plugin-commonjs": "^24.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "rollup": "^3.0.0",
+    "rollup-plugin-copy": "^4.0.0",
+    "serve": "^14.0.0"
+  }
 }
