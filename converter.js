@@ -1,6 +1,6 @@
 // Pull the legacy ESM build with CORS support from jsDelivr v0.11.6
 import { createFFmpeg, fetchFile }
-  from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js';
+  from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/umd/ffmpeg.min.js';
 
 const ffmpeg = createFFmpeg({ log: true });
 
